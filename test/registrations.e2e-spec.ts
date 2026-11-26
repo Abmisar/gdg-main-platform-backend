@@ -296,7 +296,7 @@ describe('PATCH /registrations/:registrationId', () => {
 });
 
 describe('PUT /events/:eventId/waitlist', () => {
-  it('saves the order, moves people, and drops removed ones back to PENDING', async () => {
+  it('appends to the waitlist and rejects swaps and removals', async () => {
     const event = await createEvent(30);
     const [a, b, c, d] = await register(event.eventId, 4);
 
@@ -304,19 +304,20 @@ describe('PUT /events/:eventId/waitlist', () => {
       .put(`/events/${event.eventId}/waitlist`)
       .send({ registrationIds: [a, b, c] })
       .expect(200);
-    // Reorder (swap), drop b, and add d in one request.
     await asMember(prMemberId)
       .put(`/events/${event.eventId}/waitlist`)
-      .send({ registrationIds: [c, a, d] })
+      .send({ registrationIds: [a, b, c, d] })
       .expect(200);
-
-    expect((await statusOf(c)).waitlistPosition).toBe(1);
-    expect((await statusOf(a)).waitlistPosition).toBe(2);
-    expect((await statusOf(d)).waitlistPosition).toBe(3);
-    expect(await statusOf(b)).toMatchObject({
-      status: RegistrationStatus.PENDING,
-      waitlistPosition: null,
-    });
+    for (const registrationIds of [[b, a, c, d], [a, c, d]]) {
+      const response = await asMember(prMemberId)
+        .put(`/events/${event.eventId}/waitlist`)
+        .send({ registrationIds })
+        .expect(409);
+      expect(response.body.errorCode).toBe('WAITLIST_ORDER_IMMUTABLE');
+    }
+    for (const [index, id] of [a, b, c, d].entries()) {
+      expect((await statusOf(id)).waitlistPosition).toBe(index + 1);
+    }
   });
 });
 

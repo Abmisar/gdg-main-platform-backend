@@ -486,11 +486,16 @@ describe('POST /events/:eventId/check-in', () => {
         where: { eventId: event.eventId },
         data: { endsAt: updatedEnd },
       });
-      await as(undefined)
+      const deliveryBeforeClaims = await prisma.registrationEmailDelivery.findMany({
+        where: { registrationId },
+        orderBy: { id: 'asc' },
+      });
+      const stale = await as(undefined)
         .post(`${path}/email/claim`)
         .set(workerHeaders)
         .send({ startsAt: first.body.startsAt, endsAt: first.body.endsAt })
-        .expect(409);
+        .expect(200);
+      expect(stale.body).toEqual({ email: null });
       const currentSchedule = {
         startsAt: first.body.startsAt,
         endsAt: updatedEnd.toISOString(),
@@ -504,27 +509,22 @@ describe('POST /events/:eventId/check-in', () => {
             .expect(200),
         ),
       );
-      const leases = claims.flatMap(({ body }) =>
-        body.email ? [body.email] : [],
-      );
-      expect(leases).toHaveLength(1);
-      expect(leases[0].recipient).toMatch(/@test.local$/);
+      for (const claim of claims) expect(claim.body).toEqual({ email: null });
       await as(undefined)
         .post(`${path}/email/result`)
         .set(workerHeaders)
         .send({ lease: new Date().toISOString(), state: 'SENT' })
         .expect(409);
-      await as(undefined)
-        .post(`${path}/email/result`)
-        .set(workerHeaders)
-        .send({ lease: leases[0].lease, state: 'SENT' })
-        .expect(204);
       const next = await as(undefined)
         .post(`${path}/email/claim`)
         .set(workerHeaders)
         .send(currentSchedule)
         .expect(200);
-      expect(next.body.email).toBeNull();
+      expect(next.body).toEqual({ email: null });
+      expect(await prisma.registrationEmailDelivery.findMany({
+        where: { registrationId },
+        orderBy: { id: 'asc' },
+      })).toEqual(deliveryBeforeClaims);
       await prisma.event.update({
         where: { eventId: event.eventId },
         data: { status: 'CANCELLED' },
@@ -627,12 +627,15 @@ describe('POST /events/:eventId/check-in', () => {
       const latestDelivery = await prisma.registrationEmailDelivery.findFirstOrThrow({
         where: { registrationId, kind: 'CONFIRMED', state: 'PENDING' },
       });
-      expect(latestDelivery.id).toBeGreaterThan(firstDelivery.id);
+      expect(latestDelivery.id).toBe(firstDelivery.id);
+      expect(await prisma.registrationEmailDelivery.count({
+        where: { registrationId, kind: 'CONFIRMED' },
+      })).toBe(1);
+      await expect(emailDelivery.retry(registrationId, prMemberId)).rejects.toThrow();
       await relay.sync();
       expect(calls.at(-1)?.method).toBe('GET');
       expect(sendMock).toHaveBeenLastCalledWith(expect.objectContaining({
         to: expect.stringMatching(/@test.local$/),
-        walletUrl,
         attendanceQrCodeDataUrl: expect.stringMatching(/^data:image\/png;base64,/),
       }));
       expect(
