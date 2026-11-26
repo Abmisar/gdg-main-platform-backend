@@ -17,21 +17,45 @@ const person = {
 function setup() {
   const emailService = { sendDecisionEmail: vi.fn().mockResolvedValue(undefined) };
   const tx = {
+    authUser: { delete: vi.fn(), deleteMany: vi.fn() },
     person: {
       findFirst: vi.fn().mockResolvedValue({ ...person, member: { memberId: 70, isActive: true, roleAssignments: [] } }),
       findMany: vi.fn().mockResolvedValue([{ ...person, member: { memberId: 70, isActive: true, roleAssignments: [] } }]),
+      delete: vi.fn(),
+      deleteMany: vi.fn(),
     },
-    member: { update: vi.fn().mockResolvedValue({ memberId: 70, isActive: false }) },
+    member: { delete: vi.fn().mockResolvedValue({ memberId: 70 }) },
     memberRole: {
       findFirst: vi.fn().mockResolvedValue({ id: 5 }),
       findMany: vi.fn().mockResolvedValue([]),
       createMany: vi.fn().mockResolvedValue({ count: 1 }),
+      updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+      deleteMany: vi.fn().mockResolvedValue({ count: 1 }),
     },
     memberCommittee: {
-      findUnique: vi.fn().mockResolvedValue(null),
+      findUnique: vi.fn<() => Promise<{ id: number; role: string } | null>>().mockResolvedValue(null),
       create: vi.fn().mockResolvedValue({ role: 'Member' }),
       delete: vi.fn().mockResolvedValue({ id: 123 }),
+      deleteMany: vi.fn().mockResolvedValue({ count: 1 }),
     },
+    event: { updateMany: vi.fn().mockResolvedValue({ count: 1 }) },
+    eventRegistration: { updateMany: vi.fn().mockResolvedValue({ count: 1 }) },
+    registrationBlacklistEntry: { updateMany: vi.fn().mockResolvedValue({ count: 1 }) },
+    membershipRequestCommittee: { updateMany: vi.fn().mockResolvedValue({ count: 1 }) },
+    membershipRequestGlobalRole: { updateMany: vi.fn().mockResolvedValue({ count: 1 }) },
+    committeePointEntry: {
+      updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+      deleteMany: vi.fn().mockResolvedValue({ count: 1 }),
+    },
+    globalPointEntry: {
+      updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+      deleteMany: vi.fn().mockResolvedValue({ count: 1 }),
+    },
+    announcement: { deleteMany: vi.fn().mockResolvedValue({ count: 1 }) },
+    committeeTask: { deleteMany: vi.fn().mockResolvedValue({ count: 1 }) },
+    walletBarcodeAlias: { deleteMany: vi.fn().mockResolvedValue({ count: 1 }) },
+    walletMembershipLink: { deleteMany: vi.fn().mockResolvedValue({ count: 1 }) },
+    memberSkill: { deleteMany: vi.fn().mockResolvedValue({ count: 1 }) },
     committee: { findFirst: vi.fn().mockResolvedValue({ committeeId: 3, committeeCode: 'PR', committeeName: 'Public Relations' }) },
     $queryRaw: vi.fn().mockResolvedValue([]),
     $executeRaw: vi.fn().mockResolvedValue(1),
@@ -119,11 +143,31 @@ describe('club member removal', () => {
     expect(prisma.$transaction).not.toHaveBeenCalled();
   });
 
-  it('deactivates membership and ends active roles while retaining account records', async () => {
+  it('deletes the member and clears shared attribution while retaining the person account', async () => {
     const { service, tx } = setup();
     const result = await service.removeClubPerson(actor, { email: person.emailPersonal! });
-    expect(tx.member.update).toHaveBeenCalledWith({ where: { memberId: 70 }, data: { isActive: false } });
-    expect(tx.$executeRaw).toHaveBeenCalled();
+    expect(tx.member.delete).toHaveBeenCalledExactlyOnceWith({ where: { memberId: 70 } });
+    expect(tx.memberRole.deleteMany).toHaveBeenCalledWith({ where: { memberId: 70 } });
+    expect(tx.event.updateMany).toHaveBeenCalledExactlyOnceWith({
+      where: { createdByMemberId: 70 }, data: { createdByMemberId: null },
+    });
+    expect(tx.eventRegistration.updateMany).toHaveBeenCalledTimes(3);
+    for (const field of ['reviewedByMemberId', 'checkedInByMemberId', 'excusedByMemberId']) {
+      expect(tx.eventRegistration.updateMany).toHaveBeenCalledWith({ where: { [field]: 70 }, data: { [field]: null } });
+    }
+    for (const points of [tx.committeePointEntry, tx.globalPointEntry]) {
+      expect(points.updateMany).toHaveBeenCalledExactlyOnceWith({
+        where: { awardedByMemberId: 70 }, data: { awardedByMemberId: null },
+      });
+    }
+    const [memberDeletion] = tx.member.delete.mock.invocationCallOrder;
+    for (const clear of [tx.event.updateMany, tx.eventRegistration.updateMany, tx.committeePointEntry.updateMany, tx.globalPointEntry.updateMany]) {
+      expect(Math.max(...clear.mock.invocationCallOrder)).toBeLessThan(memberDeletion);
+    }
+    expect(tx.person.delete).not.toHaveBeenCalled();
+    expect(tx.person.deleteMany).not.toHaveBeenCalled();
+    expect(tx.authUser.delete).not.toHaveBeenCalled();
+    expect(tx.authUser.deleteMany).not.toHaveBeenCalled();
     expect(result).toMatchObject({ memberId: '70', membershipRemoved: true });
   });
 
@@ -133,7 +177,15 @@ describe('club member removal', () => {
     tx.memberCommittee.findUnique.mockResolvedValue({ id: 123, role: 'Co-Leader' });
     const result = await service.removeClubPerson(actor, { email: person.emailPersonal!, committeeCode: 'PR' });
     expect(tx.memberCommittee.delete).toHaveBeenCalledWith({ where: { id: 123 } });
-    expect(tx.member.update).not.toHaveBeenCalled();
+    expect(tx.committeePointEntry.deleteMany).toHaveBeenCalledExactlyOnceWith({ where: { memberId: 70, committeeId: 3 } });
+    expect(tx.committeePointEntry.deleteMany).toHaveBeenCalledBefore(tx.memberCommittee.delete);
+    expect(tx.globalPointEntry.deleteMany).not.toHaveBeenCalled();
+    expect(tx.memberCommittee.deleteMany).not.toHaveBeenCalled();
+    expect(tx.member.delete).not.toHaveBeenCalled();
+    expect(tx.person.delete).not.toHaveBeenCalled();
+    expect(tx.person.deleteMany).not.toHaveBeenCalled();
+    expect(tx.authUser.delete).not.toHaveBeenCalled();
+    expect(tx.authUser.deleteMany).not.toHaveBeenCalled();
     expect(tx.$executeRaw).not.toHaveBeenCalled();
     expect(result).toMatchObject({ committee: { code: 'PR', role: 'Co-Leader' }, committeeMembershipRemoved: true, membershipRemoved: false });
   });
@@ -146,7 +198,7 @@ describe('club member removal', () => {
     }));
     expect(tx.$executeRaw).toHaveBeenCalledTimes(2);
     expect(tx.memberCommittee.delete).not.toHaveBeenCalled();
-    expect(tx.member.update).not.toHaveBeenCalled();
+    expect(tx.member.delete).not.toHaveBeenCalled();
     expect(result).toMatchObject({ globalRole: 'ADVISOR', globalRoleRemoved: true, membershipRemoved: false });
   });
 
@@ -157,7 +209,7 @@ describe('club member removal', () => {
       member: { memberId: 70, isActive: true, roleAssignments: [{ roleCode: 'GROUP_LEADER' }] },
     }]);
     await expect(service.removeClubPerson(actor, { email: person.emailPersonal! })).rejects.toBeInstanceOf(ConflictException);
-    expect(tx.member.update).not.toHaveBeenCalled();
+    expect(tx.member.delete).not.toHaveBeenCalled();
     expect(tx.$executeRaw).not.toHaveBeenCalled();
   });
 });
