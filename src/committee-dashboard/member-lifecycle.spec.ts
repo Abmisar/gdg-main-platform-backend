@@ -33,7 +33,7 @@ function setup() {
       deleteMany: vi.fn().mockResolvedValue({ count: 1 }),
     },
     memberCommittee: {
-      findUnique: vi.fn<() => Promise<{ id: number; role: string } | null>>().mockResolvedValue(null),
+      findUnique: vi.fn<(args: { where: { memberId_committeeId: { memberId: number; committeeId: number } }; select: { id: boolean; role: boolean } }) => Promise<{ id: number; role: string } | null>>().mockResolvedValue(null),
       create: vi.fn().mockResolvedValue({ role: 'Member' }),
       delete: vi.fn().mockResolvedValue({ id: 123 }),
       deleteMany: vi.fn().mockResolvedValue({ count: 1 }),
@@ -147,7 +147,23 @@ describe('club member removal', () => {
     const { service, tx } = setup();
     const result = await service.removeClubPerson(actor, { email: person.emailPersonal! });
     expect(tx.member.delete).toHaveBeenCalledExactlyOnceWith({ where: { memberId: 70 } });
-    expect(tx.memberRole.deleteMany).toHaveBeenCalledWith({ where: { memberId: 70 } });
+    for (const delegate of [tx.committeePointEntry, tx.globalPointEntry, tx.memberSkill, tx.memberCommittee, tx.memberRole]) {
+      expect(delegate.deleteMany).toHaveBeenCalledExactlyOnceWith({ where: { memberId: 70 } });
+    }
+    expect(tx.announcement.deleteMany).toHaveBeenCalledExactlyOnceWith({ where: { publishedByMemberId: 70 } });
+    expect(tx.committeeTask.deleteMany).toHaveBeenCalledExactlyOnceWith({
+      where: { OR: [{ assignedMemberId: 70 }, { createdByMemberId: 70 }] },
+    });
+    expect(tx.walletBarcodeAlias.deleteMany).toHaveBeenCalledExactlyOnceWith({ where: { link: { memberId: 70 } } });
+    expect(tx.walletMembershipLink.deleteMany).toHaveBeenCalledExactlyOnceWith({ where: { memberId: 70 } });
+    for (const [delegate, field] of [
+      [tx.registrationBlacklistEntry, 'resolvedByMemberId'],
+      [tx.membershipRequestCommittee, 'decidedByMemberId'],
+      [tx.membershipRequestGlobalRole, 'decidedByMemberId'],
+      [tx.memberRole, 'assignedBy'],
+    ] as const) {
+      expect(delegate.updateMany).toHaveBeenCalledExactlyOnceWith({ where: { [field]: 70 }, data: { [field]: null } });
+    }
     expect(tx.event.updateMany).toHaveBeenCalledExactlyOnceWith({
       where: { createdByMemberId: 70 }, data: { createdByMemberId: null },
     });
@@ -174,9 +190,16 @@ describe('club member removal', () => {
   it('removes only the selected committee membership without deactivating the group account', async () => {
     const { service, tx } = setup();
     tx.committee.findFirst.mockResolvedValue({ committeeId: 3, committeeCode: 'PR', committeeName: 'Public Relations' });
-    tx.memberCommittee.findUnique.mockResolvedValue({ id: 123, role: 'Co-Leader' });
+    tx.memberCommittee.findUnique.mockImplementation(async ({ where }) =>
+      where.memberId_committeeId?.memberId === 70 && where.memberId_committeeId?.committeeId === 3
+        ? { id: 123, role: 'Co-Leader' } : null,
+    );
     const result = await service.removeClubPerson(actor, { email: person.emailPersonal!, committeeCode: 'PR' });
-    expect(tx.memberCommittee.delete).toHaveBeenCalledWith({ where: { id: 123 } });
+    expect(tx.memberCommittee.findUnique).toHaveBeenCalledExactlyOnceWith({
+      where: { memberId_committeeId: { memberId: 70, committeeId: 3 } },
+      select: { id: true, role: true },
+    });
+    expect(tx.memberCommittee.delete).toHaveBeenCalledExactlyOnceWith({ where: { id: 123 } });
     expect(tx.committeePointEntry.deleteMany).toHaveBeenCalledExactlyOnceWith({ where: { memberId: 70, committeeId: 3 } });
     expect(tx.committeePointEntry.deleteMany).toHaveBeenCalledBefore(tx.memberCommittee.delete);
     expect(tx.globalPointEntry.deleteMany).not.toHaveBeenCalled();
