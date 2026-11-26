@@ -1,0 +1,20 @@
+[Unit]
+Description=GDG frontend
+StartLimitIntervalSec=0
+
+[Container]
+Image=localhost/gdg-frontend:active
+ContainerName=gdg-frontend
+Network=gdg.network
+EnvironmentFile=%h/.config/gdg/frontend.env
+NoNewPrivileges=true
+DropCapability=all
+LogDriver=journald
+
+[Service]
+Restart=always
+RestartSec=5
+TimeoutStartSec=180
+
+[Install]
+WantedBy=default.target

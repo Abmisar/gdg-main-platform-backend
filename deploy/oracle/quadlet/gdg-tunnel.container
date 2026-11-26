@@ -1,0 +1,21 @@
+[Unit]
+Description=GDG tunnel
+StartLimitIntervalSec=0
+
+[Container]
+Image=localhost/gdg-tunnel:active
+ContainerName=gdg-tunnel
+Network=gdg.network
+EnvironmentFile=%h/.config/gdg/tunnel.env
+NoNewPrivileges=true
+DropCapability=all
+LogDriver=journald
+Exec=tunnel --no-autoupdate run
+
+[Service]
+Restart=always
+RestartSec=5
+TimeoutStartSec=180
+
+[Install]
+WantedBy=default.target
