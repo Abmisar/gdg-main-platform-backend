@@ -21,11 +21,25 @@
     "is_sensitive": false
   },
   {
+    "code": "applications.club_leaders.decide",
+    "description": "Approve committee leader and developer lead applications",
+    "scope": "global",
+    "grant_permission": null,
+    "is_sensitive": true
+  },
+  {
     "code": "applications.decide",
     "description": "Accept / reject committee applications (inside the window)",
     "scope": "committee",
     "grant_permission": null,
     "is_sensitive": false
+  },
+  {
+    "code": "applications.developer_leaders.decide",
+    "description": "Approve developer committee leader applications",
+    "scope": "global",
+    "grant_permission": null,
+    "is_sensitive": true
   },
   {
     "code": "attendance.record",
@@ -105,6 +119,27 @@
     "is_sensitive": false
   },
   {
+    "code": "club.dashboard.view",
+    "description": "View the club leadership dashboard",
+    "scope": "global",
+    "grant_permission": null,
+    "is_sensitive": false
+  },
+  {
+    "code": "club.points.manage",
+    "description": "Award points to committee leaders and the overall Developer Committees Leader",
+    "scope": "global",
+    "grant_permission": null,
+    "is_sensitive": true
+  },
+  {
+    "code": "club.tasks.manage",
+    "description": "Assign and review tasks for committee leadership",
+    "scope": "global",
+    "grant_permission": null,
+    "is_sensitive": true
+  },
+  {
     "code": "contacts.view",
     "description": "See phone numbers of accepted registrants (purpose required)",
     "scope": "event",
@@ -112,11 +147,46 @@
     "is_sensitive": true
   },
   {
+    "code": "dashboard.view",
+    "description": "View committee dashboard data",
+    "scope": "committee",
+    "grant_permission": null,
+    "is_sensitive": false
+  },
+  {
     "code": "decisions.any_time",
     "description": "Decide applications / registrations outside the review window",
     "scope": "global",
     "grant_permission": null,
     "is_sensitive": false
+  },
+  {
+    "code": "developer_committees.dashboard.view",
+    "description": "View developer committees leadership dashboard",
+    "scope": "global",
+    "grant_permission": null,
+    "is_sensitive": false
+  },
+  {
+    "code": "developer_committees.members.assign",
+    "description": "Assign existing accounts within the six developer committees",
+    "scope": "global",
+    "grant_permission": null,
+    "is_sensitive": true
+  },
+  {
+    "code": "developer_committees.points.manage",
+    "description": "Award points to leaders of developer subcommittees",
+    "scope": "global",
+    "grant_permission": null,
+    "is_sensitive": true
+  },
+  {
+    "code": "developer_committees.tasks.manage",
+    "description": "Assign and review tasks for developer committee leadership",
+    "scope": "global",
+    "grant_permission": null,
+    "is_sensitive": true
   },
   {
     "code": "events.create",
@@ -182,6 +252,13 @@
     "is_sensitive": true
   },
   {
+    "code": "points.manage",
+    "description": "Award and deduct committee points",
+    "scope": "committee",
+    "grant_permission": null,
+    "is_sensitive": false
+  },
+  {
     "code": "registrants.view",
     "description": "See registrants' names and answers (no phones)",
     "scope": "event",
@@ -199,6 +276,13 @@
     "code": "staff.assign",
     "description": "Assign workshop organizers and PR staff",
     "scope": "event",
+    "grant_permission": null,
+    "is_sensitive": false
+  },
+  {
+    "code": "tasks.manage",
+    "description": "Create and manage committee tasks",
+    "scope": "committee",
     "grant_permission": null,
     "is_sensitive": false
   },

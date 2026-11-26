@@ -682,6 +682,151 @@ describe('POST /events/:eventId/check-in', () => {
     }
   });
 
+  it.fails('known failure: legacy Wallet FAILED result must not overwrite a retried delivery', async () => {
+    const { event, registrationId, token } = await confirmedGuest();
+    const config = app.get(ConfigService);
+    const relay = app.get(GuestWalletRelayService);
+    const emailDelivery = app.get(RegistrationEmailDeliveryService);
+    const committeeCode =
+      'WTEST_' + randomBytes(4).toString('hex').toUpperCase();
+    const committee = await prisma.committee.create({
+      data: { committeeCode, committeeName: committeeCode },
+    });
+    const registration = await statusOf(registrationId);
+    await prisma.person.update({
+      where: { personId: registration.personId },
+      data: { emailPersonalVerifiedAt: new Date() },
+    });
+    await prisma.event.update({
+      where: { eventId: event.eventId },
+      data: { committeeId: committee.committeeId },
+    });
+    const auth = randomBytes(32).toString('base64url');
+    config.set('WALLET_GUEST_RELAY_TOKEN', auth);
+    config.set('WALLET_GUEST_RELAY_ORIGIN', 'http://127.0.0.1:9870');
+    config.set('WALLET_GUEST_COMMITTEES', committeeCode);
+    let state: 'PENDING' | 'PUBLISHED' = 'PENDING';
+    let revision = 0;
+    let legacyDeliveryId: number | null = null;
+    const walletUrl = `http://127.0.0.1:9870/m/${randomBytes(32).toString('base64url')}/id.pkpass`;
+    const sendMock = vi
+      .spyOn(app.get(RegistrationEmailService), 'send')
+      .mockRejectedValueOnce(new Error('Simulated GDG SMTP failure'))
+      .mockResolvedValue(undefined);
+    const calls: Array<{ method: string; body?: Record<string, unknown> }> = [];
+    const fetchMock = vi
+      .spyOn(globalThis, 'fetch')
+      .mockImplementation(async (input, init) => {
+        expect(String(input)).toBe(
+          `http://127.0.0.1:9870/integrations/v1/guest-tickets/${committeeCode}/${registrationId}`,
+        );
+        expect(new Headers(init?.headers).get('Authorization')).toBe(
+          `Bearer ${auth}`,
+        );
+        const body = init?.body ? JSON.parse(String(init.body)) : undefined;
+        calls.push({ method: init?.method ?? 'GET', body });
+        if (body) {
+          revision = body.revision;
+          state = 'PENDING';
+        }
+        return Response.json({
+          revision,
+          deliveryId: legacyDeliveryId,
+          emailState: legacyDeliveryId === null ? 'NONE' : 'FAILED',
+          walletState: state,
+          ...(state === 'PUBLISHED' ? { walletUrl } : {}),
+        });
+      });
+    try {
+      await relay.sync();
+      expect(calls).toHaveLength(1);
+      expect(calls[0]).toMatchObject({
+        method: 'PUT',
+        body: { active: true, revision: 1, barcode: token, emailByGdg: true },
+      });
+      expect(calls[0].body).not.toHaveProperty('email');
+      expect(sendMock).not.toHaveBeenCalled();
+      const firstDelivery = await prisma.registrationEmailDelivery.findFirstOrThrow({
+        where: { registrationId, kind: 'CONFIRMED' },
+      });
+      expect(
+        (
+          await prisma.walletGuestProjection.findUniqueOrThrow({
+            where: { registrationId },
+          })
+        ).pending,
+      ).toBe(false);
+      state = 'PUBLISHED';
+      await relay.sync();
+      expect(calls.at(-1)?.method).toBe('GET');
+      expect(
+        (
+          await prisma.registrationEmailDelivery.findUniqueOrThrow({
+            where: { id: firstDelivery.id },
+          })
+        ).state,
+      ).toBe('FAILED');
+      await emailDelivery.retry(registrationId, prMemberId);
+      legacyDeliveryId = firstDelivery.id;
+      const latestDelivery = await prisma.registrationEmailDelivery.findFirstOrThrow({
+        where: { registrationId, kind: 'CONFIRMED', state: 'PENDING' },
+      });
+      expect(latestDelivery.id).toBe(firstDelivery.id);
+      expect(await prisma.registrationEmailDelivery.count({
+        where: { registrationId, kind: 'CONFIRMED' },
+      })).toBe(1);
+      await expect(emailDelivery.retry(registrationId, prMemberId)).rejects.toThrow();
+      await relay.sync();
+      expect(calls.at(-1)?.method).toBe('GET');
+      expect((await prisma.registrationEmailDelivery.findUniqueOrThrow({ where: { id: firstDelivery.id } })).state).toBe('PENDING');
+      expect(sendMock).toHaveBeenLastCalledWith(expect.objectContaining({
+        to: expect.stringMatching(/@test.local$/),
+        attendanceQrCodeDataUrl: expect.stringMatching(/^data:image\/png;base64,/),
+      }));
+      expect(
+        (
+          await prisma.registrationEmailDelivery.findUniqueOrThrow({
+            where: { id: latestDelivery.id },
+          })
+        ).state,
+      ).toBe('SENT');
+      const endsAt = new Date(event.endsAt.getTime() + HOUR);
+      await prisma.event.update({
+        where: { eventId: event.eventId },
+        data: { endsAt },
+      });
+      await relay.sync();
+      expect(calls.at(-1)).toMatchObject({
+        method: 'PUT',
+        body: {
+          active: true,
+          revision: 2,
+          endsAt: endsAt.toISOString(),
+          emailByGdg: true,
+        },
+      });
+      await prisma.event.update({
+        where: { eventId: event.eventId },
+        data: { status: 'CANCELLED' },
+      });
+      await relay.sync();
+      expect(calls.at(-1)).toEqual({
+        method: 'PUT',
+        body: { active: false, expired: false, revision: 3 },
+      });
+      const count = calls.length;
+      await relay.sync();
+      expect(calls).toHaveLength(count);
+      expect(sendMock).toHaveBeenCalledTimes(2);
+    } finally {
+      sendMock.mockRestore();
+      fetchMock.mockRestore();
+      config.set('WALLET_GUEST_RELAY_TOKEN', '');
+      config.set('WALLET_GUEST_RELAY_ORIGIN', '');
+      config.set('WALLET_GUEST_COMMITTEES', '');
+    }
+  });
+
   it('checks in once, then answers Already Checked In', async () => {
     const { event, registrationId, token } = await confirmedGuest();
 
