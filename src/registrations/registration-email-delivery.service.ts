@@ -158,12 +158,14 @@ export class RegistrationEmailDeliveryService {
     }
     const to = person.emailPersonal ?? person.emailUniversity;
     if (!to) throw new Error('Missing recipient');
-    const attendanceQrCodeDataUrl =
-      kind === 'CONFIRMED' && registration.attendanceTokenEncrypted
-        ? await AttendanceTokenService.qrImage(
-            this.tokens.reveal(registration.attendanceTokenEncrypted),
-          )
-        : undefined;
+    let attendanceQrCodeDataUrl: string | null | undefined;
+    if (kind === 'CONFIRMED' && registration.attendanceTokenEncrypted) {
+      const token = this.tokens.revealOrNull(
+        registration.attendanceTokenEncrypted,
+        registration.registrationId,
+      );
+      attendanceQrCodeDataUrl = token ? await AttendanceTokenService.qrImage(token) : null;
+    }
     await this.email.send({
       kind,
       registrationId: registration.registrationId,

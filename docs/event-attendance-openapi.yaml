@@ -3,6 +3,13 @@ info:
   title: GDG event attendance and email delivery
   version: 1.0.0
 paths:
+  /my/registrations:
+    get:
+      security: [{ accessCookie: [] }]
+      summary: List the signed-in attendee's registrations
+      responses:
+        '200':
+          description: Registrations include a nullable attendanceQrCodeDataUrl. When the stored attendance token cannot be decrypted, the QR field is null and any previously issued code can still be used for check-in.
   /registrations/{registrationId}/confirm:
     parameters:
       - $ref: '#/components/parameters/RegistrationId'

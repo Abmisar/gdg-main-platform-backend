@@ -126,9 +126,13 @@ export class GuestWalletRelayService {
         !!row.attendanceTokenEncrypted;
       const active = eligible && !expired;
       if (!active && !walletProjection) return null;
+      const barcode = active
+        ? this.tokens.revealOrNull(row.attendanceTokenEncrypted, registrationId)
+        : null;
+      if (active && !barcode) return null;
       const email = row.emailDeliveries[0];
       const deliveryId = active && email?.state === 'PENDING' ? email.id : undefined;
-      const body = active
+      const body = barcode
         ? {
             active: true,
             emailByGdg: true,
@@ -136,7 +140,7 @@ export class GuestWalletRelayService {
             title: visibleText(event.name, 160),
             startsAt: event.startsAt.toISOString(),
             endsAt: event.endsAt.toISOString(),
-            barcode: this.tokens.reveal(row.attendanceTokenEncrypted!),
+            barcode,
           }
         : { active: false, expired: eligible && expired };
       const fingerprint = createHash('sha256')
