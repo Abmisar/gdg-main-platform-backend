@@ -9,14 +9,17 @@ x-runtime: &runtime
     options:
       max-size: 10m
       max-file: "3"
-  networks:
-    app: {}
-    egress:
-      gw_priority: 1
 
 services:
   backend:
     <<: *runtime
+    networks:
+      app:
+        aliases: [gdg-backend]
+      backend_egress:
+        gw_priority: 1
+    environment:
+      TRUSTED_CF_PROXY_IPS: ${APP_NETWORK_PREFIX:?network prefix required}.2,${APP_NETWORK_PREFIX}.3
     container_name: gdg-backend
     image: gdg-backend:${RELEASE_TAG:?release tag required}
     build:
@@ -40,14 +43,18 @@ services:
       context: ${FRONTEND_SOURCE:-${HOME}/frontend}
       dockerfile: Dockerfile.oracle
       args:
-        API_PROXY_TARGET: ${API_BUILD_ORIGIN:-https://api.gdguj.org}
+        API_PROXY_TARGET: ${API_PROXY_TARGET:?internal API origin required}
+        CSP_IMAGE_ORIGINS: ${CSP_IMAGE_ORIGINS:?storage origin required}
+        CSP_REPORT_URI: ${CSP_REPORT_URI:-}
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:?public API origin required}
     env_file:
       - path: ${GDG_CONFIG:-${HOME}/.config/gdg}/frontend.env
         format: raw
     networks:
       app:
         aliases: [gdg-frontend]
-      egress:
+        ipv4_address: ${APP_NETWORK_PREFIX}.3
+      frontend_egress:
         gw_priority: 1
     healthcheck:
       test: [CMD, node, -e, "fetch('http://127.0.0.1:3000/colorful-logo.svg',{redirect:'manual'}).then(r=>process.exit(r.status===200?0:1)).catch(()=>process.exit(1))"]
@@ -57,6 +64,11 @@ services:
       retries: 3
   cloudflared:
     <<: *runtime
+    networks:
+      app:
+        ipv4_address: ${APP_NETWORK_PREFIX}.2
+      tunnel_egress:
+        gw_priority: 1
     image: ${TUNNEL_IMAGE:?tunnel image digest required}
     command: [tunnel, --no-autoupdate, run]
     environment:
@@ -73,6 +85,12 @@ services:
 
 networks:
   app:
+    name: ${COMPOSE_PROJECT_NAME}-app-${APP_NETWORK_PREFIX}
     internal: true
-  egress:
-    driver: bridge
+    ipam:
+      config:
+        - subnet: ${APP_NETWORK_PREFIX}.0/24
+          ip_range: ${APP_NETWORK_PREFIX}.128/25
+  backend_egress: {}
+  frontend_egress: {}
+  tunnel_egress: {}

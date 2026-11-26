@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
+unset API_PROXY_TARGET CSP_IMAGE_ORIGINS CSP_REPORT_URI NEXT_PUBLIC_API_URL APP_NETWORK_PREFIX
 cd "$HOME/backend/deploy/oracle"
 test "$(id -u)" != 0
 state="$HOME/.local/state/gdg"
@@ -23,9 +24,10 @@ if [[ ${1:-} == rollback ]]; then
   test -f "$state/previous/tags.env"
   candidate=$(readlink -f "$state/previous")
 else
-  for name in backend frontend tunnel backup; do
+  for name in backend frontend tunnel backup network; do
     file="$HOME/.config/gdg/$name.env"
     while IFS='=' read -r key _; do
+      if [[ $key == CSP_REPORT_URI ]]; then continue; fi
       grep -qE "^$key=.+" "$file" || { echo "Missing $key in $name.env" >&2; exit 1; }
     done < "env/$name.env.example"
   done
@@ -34,6 +36,24 @@ else
   candidate=$(mktemp -d "$state/$(date -u +%Y%m%dT%H%M%SZ)-XXXXXX")
   cp compose.oracle.yml "$candidate/compose.yml"
   printf 'RELEASE_TAG=%s\nTUNNEL_IMAGE=%s\n' "${candidate##*/}" "$tunnel_image" > "$candidate/tags.env"
+  python3 - "$HOME/.config/gdg" "$candidate/tags.env" <<'PYCONFIG'
+from pathlib import Path
+import sys
+
+root = Path(sys.argv[1])
+with Path(sys.argv[2]).open("a") as out:
+    for name, keys in (("network", ("APP_NETWORK_PREFIX",)),
+                       ("frontend", ("API_PROXY_TARGET", "CSP_IMAGE_ORIGINS", "CSP_REPORT_URI", "NEXT_PUBLIC_API_URL"))):
+        values = dict(line.split("=", 1) for line in (root / (name + ".env")).read_text().splitlines()
+                      if "=" in line)
+        for key in keys:
+            value = values.get(key, "")
+            if any(char in value for char in ("'", chr(92), chr(0), chr(13))):
+                raise ValueError("Invalid Compose value for " + key)
+            if key == "API_PROXY_TARGET" and value != "http://gdg-backend:3001":
+                raise ValueError("Oracle rewrites require the internal API target")
+            out.write(f"{key}='{value}'\n")
+PYCONFIG
   for app in backend frontend; do git -C "$HOME/$app" rev-parse HEAD; done > "$candidate/commits"
   compose "$candidate" config --quiet
   compose "$candidate" pull cloudflared

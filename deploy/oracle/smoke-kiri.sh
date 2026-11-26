@@ -18,14 +18,16 @@ frontend=${1:-$(dirname "$backend")/frontend}
 scratch=$(mktemp -d)
 export RELEASE_TAG="smoke-$$"
 export BACKEND_SOURCE="$scratch/backend" FRONTEND_SOURCE="$scratch/frontend"
-export GDG_CONFIG="$scratch" API_BUILD_ORIGIN=https://api.example.invalid
+export GDG_CONFIG="$scratch" API_PROXY_TARGET=http://gdg-backend:3001
+export APP_NETWORK_PREFIX="${APP_NETWORK_PREFIX:-10.253.$((RANDOM % 256))}" CSP_IMAGE_ORIGINS=https://storage.example.invalid NEXT_PUBLIC_API_URL=https://api.example.invalid
 export TUNNEL_IMAGE=docker.io/cloudflare/cloudflared@sha256:55c7e3e8d89d5e8d20b75a82f3602cbf98e06db406e73e282073cfdc5a9a3af6
 cat > "$scratch/backend.env" <<'ENV'
 DATABASE_URL=postgresql://postgres:fixture@db/postgres
 BETTER_AUTH_SECRET=abcdefghijklmnopqrstuvwxyz0123456789
+TRUST_PROXY_HOPS=0
 FRONTEND_URL=https://example.invalid
 ENV
-echo 'API_PROXY_TARGET=https://api.example.invalid' > "$scratch/frontend.env"
+echo 'API_PROXY_TARGET=http://gdg-backend:3001' > "$scratch/frontend.env"
 echo 'TUNNEL_TOKEN=fixture' > "$scratch/tunnel.env"
 cat > "$scratch/smoke.yml" <<'YAML'
 services:
