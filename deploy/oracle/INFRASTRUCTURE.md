@@ -53,19 +53,16 @@ Still to configure: a permanent edge redirect from `www.gdguj.org` to the apex, 
 
 - Bucket name: `gdg-backups` (private)
 - Lifecycle: objects under `snapshots/` expire after 14 days
-- Status: pending. R2 must be enabled once in the Cloudflare dashboard before the bucket can be created. After enabling, run:
-
-```sh
-wrangler r2 bucket create gdg-backups
-wrangler r2 bucket lifecycle add gdg-backups expire-snapshots snapshots/ --expire-days 14
-```
+- Storage class: Standard, which is the only class inside the free 10 GB allowance
+- Extra lifecycle rule: incomplete multipart uploads are aborted after 7 days
+- Status: created on 2026-11-26.
 
 - An R2 API token with Object Read & Write, scoped to `gdg-backups` only, is created in the dashboard and entered on the server through `configure.py backup`.
 
 ## Oracle Cloud
 
 - Tenancy: `gdscuj`, home region `me-jeddah-1`
-- Account status: Free Trial. Upgrade to Pay As You Go is pending. Set a $1 monthly budget alert after upgrading.
+- Account status: Free Trial. It stays on Free Trial on purpose: after the trial credit ends, Always Free resources keep running and nothing can be charged. Upgrading to Pay As You Go is the only step that makes charges possible, so it is not done.
 - Instance: `gdg-prod`
   - Availability domain: AD-1
   - Shape: `VM.Standard.A1.Flex`, 2 OCPU, 12 GB RAM, Always Free-eligible
@@ -76,9 +73,22 @@ wrangler r2 bucket lifecycle add gdg-backups expire-snapshots snapshots/ --expir
   - Internet access: the VCN's internet gateway and default route table, plus network security group `ig-quick-action-NSG` (all egress allowed, created with the "Connect public subnet to internet" quick action)
   - Public IP: an ephemeral public IPv4 on the primary VNIC, used only for administrator SSH. Web traffic arrives through the Cloudflare Tunnel.
   - SSH: one ed25519 public key, comment `gdg-oracle-deploy`. The private key is held only by the administrator.
-- Status: instance created and **Running** (2026-11-26, 16:08 UTC). Assigning the ephemeral public IP is pending.
+- Status: instance created and **Running** (2026-11-26, 16:08 UTC), ephemeral public IP assigned, bootstrapped with Docker and Compose.
 
 After the instance exists, restrict the subnet security list so TCP 22 is open only to the administrator's IP, and remove other public ingress. Outbound must allow DNS, HTTPS, Cloudflare Tunnel (TCP/UDP 7844), Resend SMTP (TCP 465) and the Supabase PostgreSQL port.
+
+## Billing guards
+
+| Service | Guard |
+|---|---|
+| Oracle | Monthly budget `gdg-zero-spend` on the root compartment, $1, alert by email at 1% of actual spend. |
+| Cloudflare | Billing budget alert at $0.01, plus Cloudflare's default budget alert. Only active subscription is R2 at $0, zone plan is Free. |
+| Supabase, Resend, UptimeRobot, GitHub | Free plans with no payment method. |
+| Domain | Renews yearly through the registrar; this is the only planned cost. |
+
+Keep usage inside these limits: Oracle A1 2 OCPU / 12 GB and 200 GB block storage; R2 10 GB Standard storage, 1 million Class A and 10 million Class B operations a month.
+
+Oracle reclaims idle Always Free instances when CPU, network and memory all stay under 20% at the 95th percentile for 7 days. Memory use is measured after the first deploy; if it is low, the instance is resized to 2 OCPU / 6 GB.
 
 ## Secrets
 
@@ -95,10 +105,9 @@ Google OAuth callback to register: `https://gdguj.org/api/auth/callback/google`.
 
 ## Remaining steps
 
-1. Assign the ephemeral public IP to `gdg-prod` (VNIC → IP administration → Edit → Ephemeral public IP) and note it.
-2. Upgrade the Oracle account to Pay As You Go and add a $1 budget alert.
-3. Enable R2, create `gdg-backups` with its lifecycle rule, and create the scoped R2 token.
-4. Lock SSH to the administrator IP in the security list.
-5. Bootstrap the server with `bootstrap.sh`, enter secrets with `configure.py`, and deploy with `release.sh`.
-6. Verify readiness, sign-in, email delivery and the first R2 snapshot.
-7. Add the `www` to apex redirect and UptimeRobot checks for the frontend and API readiness.
+1. Create the scoped R2 token.
+2. Enter secrets with `configure.py` and deploy with `release.sh`.
+3. Verify readiness, sign-in, email delivery and the first R2 snapshot.
+4. Measure memory use and decide on the idle-reclaim resize.
+5. Add the `www` to apex redirect and UptimeRobot checks for the frontend and API readiness.
+6. Optionally lock SSH to the administrator IP in the security list.
