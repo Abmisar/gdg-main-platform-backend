@@ -1,6 +1,7 @@
 import getpass
 import ipaddress
 import os
+import re
 from pathlib import Path
 import sys
 import tempfile
@@ -22,6 +23,8 @@ def main():
             if key == "CSP_REPORT_URI=" and not value:
                 lines.append(key)
                 continue
+            if key == "SECURITY_ALERT_EMAIL=" and not re.fullmatch(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}", value):
+                raise ValueError("Enter a single security role mailbox address")
             if key == "APP_NETWORK_PREFIX=":
                 network = ipaddress.IPv4Network(value + ".0/24")
                 first, second, *_ = network.network_address.packed
