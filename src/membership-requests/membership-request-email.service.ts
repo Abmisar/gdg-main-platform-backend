@@ -30,7 +30,9 @@ function escapeHtml(value: string): string {
 export class MembershipRequestEmailService {
   private readonly logger = new Logger(MembershipRequestEmailService.name);
 
-  constructor(@Inject(SmtpEmailService) private readonly smtp: SmtpEmailService) {}
+  constructor(
+    @Inject(SmtpEmailService) private readonly smtp: SmtpEmailService,
+  ) {}
 
   async sendDecisionEmail(email: MembershipDecisionEmail): Promise<void> {
     if (!email.to) {
@@ -64,50 +66,54 @@ export class MembershipRequestEmailService {
     }
 
     const isCommitteeDecision = Boolean(email.committeeName);
-    const targetName = email.committeeName ?? email.globalRoleName ?? 'الدور المطلوب';
-    const targetNameEn = email.committeeName ?? email.globalRoleName ?? 'requested role';
-    const roleName = email.roleName === 'Member'
-      ? 'عضو'
-      : email.roleName === 'Leader'
-        ? 'قائد'
-        : email.roleName === 'Co-Leader'
-          ? 'نائب قائد'
-          : email.roleName;
-    const roleNameEn = email.roleName === 'Member'
-      ? 'Member'
-      : email.roleName === 'Leader'
-        ? 'Leader'
-        : email.roleName === 'Co-Leader'
-          ? 'Co-Leader'
-          : email.roleName;
+    const targetName =
+      email.committeeName ?? email.globalRoleName ?? 'الدور المطلوب';
+    const targetNameEn =
+      email.committeeName ?? email.globalRoleName ?? 'requested role';
+    const roleName =
+      email.roleName === 'Member'
+        ? 'عضو'
+        : email.roleName === 'Leader'
+          ? 'قائد'
+          : email.roleName === 'Co-Leader'
+            ? 'نائب قائد'
+            : email.roleName;
+    const roleNameEn =
+      email.roleName === 'Member'
+        ? 'Member'
+        : email.roleName === 'Leader'
+          ? 'Leader'
+          : email.roleName === 'Co-Leader'
+            ? 'Co-Leader'
+            : email.roleName;
     const committeeRoleDescriptor = roleName ? ` كـ${roleName}` : '';
     const committeeRoleDescriptorEn = roleNameEn ? ` as a ${roleNameEn}` : '';
-    const subjectAr = email.decision === 'APPROVED'
-      ? isCommitteeDecision
-        ? `مبارك تم قبولك في لجنة ${targetName}! ✨`
-        : 'مبارك تم قبولك! ✨'
-      : isCommitteeDecision
-        ? `تحديث بخصوص طلبك للانضمام إلى لجنة ${targetName}`
-        : `تحديث بخصوص طلبك للدور ${targetName}`;
-    const subjectEn = email.decision === 'APPROVED'
-      ? isCommitteeDecision
-        ? `Congratulations, You’ve Been Accepted to ${targetNameEn}! ✨`
-        : 'Congratulations, You’ve Been Accepted! ✨'
-      : `An Update on Your Application to Google Developer Groups on Campus | University of Jeddah`;
+    const subjectAr =
+      email.decision === 'APPROVED'
+        ? isCommitteeDecision
+          ? `مُبارك تم قبولك في ${targetName} !✨`
+          : 'مُبارك تم قبولك! ✨'
+        : 'تحديث بخصوص طلب انضمامك إلى مجموعة مطوّري جوجل بجامعة جدة';
+    const subjectEn =
+      email.decision === 'APPROVED'
+        ? isCommitteeDecision
+          ? `Congratulations You’ve Been Accepted to ${targetNameEn} ✨`
+          : 'Congratulations You’ve Been Accepted! ✨'
+        : `An Update on Your Application to Google Developer Groups on Campus | University of Jeddah`;
     const greetingAr = `مرحبًا ${email.recipientName}،`;
     const greetingEn = `Hello ${email.recipientName},`;
-    const bodyAr = email.decision === 'APPROVED'
-      ? isCommitteeDecision
-        ? `يسعدنا إبلاغك بأنه تم قبولك في لجنة ${targetName}${committeeRoleDescriptor}! 🎈\n\nسعداء بانضمامك إلى مجموعتنا، ونؤمن بأن شغفك وأفكارك ستكون إضافة مميزة للجنة، ونتطلع إلى ما ستقدّمه من إبداع، وإلى ما سنحققه معًا من خطوات وإنجازات مميزة 💡🚀!`
-        : `يسعدنا إبلاغك بأنه تم قبولك كـ ${targetName}! 🎈\n\nسعداء بانضمامك إلى مجموعتنا، ونؤمن بأن شغفك وأفكارك ستكون إضافة مميزة لفريقنا، ونتطلع إلى ما ستقدّمه من إبداع، وإلى ما سنحققه معًا من خطوات وإنجازات مميزة 💡`
-      : isCommitteeDecision
-        ? `شكرًا لاهتمامك بالتسجيل في مجموعة مطوّري جوجل بجامعة جدة${committeeRoleDescriptor ? ` كـ${roleName}` : ''}، ورغبتك في أن تكون جزءًا من رحلتنا.\n\nبعد مراجعة طلبات التسجيل، نعتذر عن عدم تمكّنك من الانضمام إلى المجموعة في هذا الترم. لا يقلل ذلك من قدراتك أو شغفك، وإنما جاء نتيجة محدودية المقاعد وكثرة الطلبات.\n\nلكن رحلتك معنا لا تتوقف هنا! ✨ يُسعدنا حضورك في ورشنا وفعالياتنا القادمة والاستفادة من التجارب والفرص التي نقدمها.`
-        : `شكرًا لاهتمامك بالتسجيل في مجموعة مطوّري جوجل بجامعة جدة كـ${targetName}، ورغبتك في أن تكون جزءًا من رحلتنا.\n\nبعد مراجعة طلبات التسجيل، نعتذر عن عدم تمكّنك من الانضمام إلى المجموعة في هذا الترم. لا يقلل ذلك من قدراتك أو شغفك، وإنما جاء نتيجة محدودية المقاعد وكثرة الطلبات.\n\nلكن رحلتك معنا لا تتوقف هنا! ✨ يُسعدنا حضورك في ورشنا وفعالياتنا القادمة والاستفادة من التجارب والفرص التي نقدمها.`;
-    const bodyEn = email.decision === 'APPROVED'
-      ? isCommitteeDecision
-        ? `We’re delighted to inform you that you have been accepted into the ${targetNameEn} Committee${committeeRoleDescriptorEn}! 🎈\n\nWe’re excited to welcome you to our community. We believe your passion and ideas will be a valuable addition to the committee, and we look forward to the creativity you bring and the milestones and achievements we’ll accomplish together. 💡`
-        : `We’re delighted to inform you that you have been accepted as ${targetNameEn}! 🎈\n\nWe’re excited to welcome you to our community. We believe your passion and ideas will be a valuable addition to our team, and we look forward to the creativity you bring and the milestones and achievements we’ll accomplish together. 💡`
-      : `Thank you for your interest in joining Google Developer Groups on Campus, University of Jeddah${isCommitteeDecision ? ` as a ${roleNameEn ?? 'member'} of the ${targetNameEn} Committee` : ` as a ${targetNameEn}`}, and for wanting to be part of our journey.\n\nAfter carefully reviewing the applications, we regret that we’re unable to offer you a place in the community this semester. This decision does not reflect your abilities or passion; it is due to limited places and the high number of applications.\n\nHowever, your journey with us doesn’t end here! ✨ We’d be delighted to welcome you to our upcoming workshops and events, where you can benefit from the experiences and opportunities we offer.`;
+    const bodyAr =
+      email.decision === 'APPROVED'
+        ? isCommitteeDecision
+          ? `يُسعدنا إبلاغك بأنه تم قبولك في لجنة ${targetName}${committeeRoleDescriptor}! 🎈\n\nسعداء بانضمامك إلى مجموعتنا، ونؤمن بأن شغفك وأفكارك ستكون إضافة مميزة للجنة، ونتطلع إلى ما ستقدّمه من إبداع، وإلى ما سنحققه معًا من خطوات وإنجازات مميزة💡`
+          : `يُسعدنا إبلاغك بأنه تم قبولك كـ ${targetName}! 🎈\n\nسعداء بانضمامك إلى مجموعتنا، ونؤمن بأن شغفك وأفكارك ستكون إضافة مميزة لفريقنا، ونتطلع إلى ما ستقدّمه من إبداع، وإلى ما سنحققه معًا من خطوات وإنجازات مميزة💡`
+        : `شكرًا لاهتمامك بالتسجيل في مجموعة مطوّري جوجل بجامعة جدة${isCommitteeDecision ? committeeRoleDescriptor : ` كـ${targetName}`}، ورغبتك في أن تكون جزءًا من رحلتنا\n\nبعد مراجعة طلبات التسجيل، نعتذر عن عدم تمكّنك من الانضمام إلى المجموعة في هذا الفصل الدراسي، وذلك لا يقلل من قدراتك أو شغفك، وإنما جاء نتيجة محدودية المقاعد وكثرة الطلبات\n\nلكن رحلتك معنا لا تتوقف هُنا! ✨\nيُسعدنا حضورك في ورشنا وفعالياتنا القادمة، والاستفادة من التجارب والفرص التي نقدمها`;
+    const bodyEn =
+      email.decision === 'APPROVED'
+        ? isCommitteeDecision
+          ? `We’re delighted to inform you that you have been accepted into the ${targetNameEn} Committee${committeeRoleDescriptorEn}! 🎈\n\nWe’re excited to welcome you to our community, We believe your passion and ideas will be a valuable addition to the committee, and we look forward to seeing the creativity you bring and the milestones and achievements we’ll accomplish together. 💡`
+          : `We’re delighted to inform you that you have been accepted as ${targetNameEn}! 🎈\n\nWe’re excited to welcome you to our community, We believe your passion and ideas will be a valuable addition to our team, and we look forward to seeing the creativity you bring and the milestones and achievements we’ll accomplish together. 💡`
+        : `Thank you for your interest in joining Google Developer Groups on Campus, University of Jeddah${isCommitteeDecision ? ` as a ${roleNameEn ?? 'member'} of the ${targetNameEn} Committee` : ` as a ${targetNameEn}`}, and for your desire to be part of our journey\n\nAfter carefully reviewing the applications, we regret to inform you that we are unable to offer you a place in the community this semester. This decision does not reflect your abilities or passion, but is due to the limited number of available spots and the high volume of applications received\n\nHowever, your journey with us doesn’t end here! ✨\n\nWe’d be delighted to welcome you to our upcoming workshops and events, where you can continue learning and benefit from the experiences and opportunities we offer`;
 
     const subject = `${subjectAr} | ${subjectEn}`;
     const htmlBodyAr = escapeHtml(bodyAr).replace(/\n/g, '<br>');

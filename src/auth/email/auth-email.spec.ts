@@ -5,6 +5,14 @@ import {
   renderAuthEmail,
 } from './auth-email.js';
 
+const actions = {
+  verification: ['Verify my email', 'تأكيد بريدي الإلكتروني'],
+  reset: ['Reset my password', 'إعادة تعيين كلمة المرور'],
+  welcome: ['Explore the Community', 'استكشاف المجموعة'],
+  'email-change': ['Confirm email change', 'تأكيد تغيير البريد'],
+  'password-changed': ['Sign In', 'تسجيل الدخول'],
+};
+
 describe('auth email rendering', () => {
   for (const locale of ['en', 'ar'] as const) {
     for (const kind of AUTH_EMAIL_KINDS) {
@@ -29,8 +37,10 @@ describe('auth email rendering', () => {
         expect(result.html.match(/class="cta"/g)).toHaveLength(2);
         expect(result.html).toContain('dir="rtl"');
         expect(result.html).toContain('dir="ltr"');
-        expect(result.text).toContain('Verify my email');
-        expect(result.text).toContain('تأكيد بريدي الإلكتروني');
+        for (const action of actions[kind]) {
+          expect(result.text).toContain(action);
+          expect(result.html).toContain(action);
+        }
         expect(result.html).not.toMatch(/data:image|<script|<svg/);
         expect(Buffer.byteLength(result.html)).toBeLessThan(100_000);
         expect(result.text).toContain(EMAIL_BRAND.linkedin);
