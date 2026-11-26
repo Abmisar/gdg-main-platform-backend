@@ -88,7 +88,7 @@ After the instance exists, restrict the subnet security list so TCP 22 is open o
 
 Keep usage inside these limits: Oracle A1 2 OCPU / 12 GB and 200 GB block storage; R2 10 GB Standard storage, 1 million Class A and 10 million Class B operations a month.
 
-Oracle reclaims idle Always Free instances when CPU, network and memory all stay under 20% at the 95th percentile for 7 days. Memory use is measured after the first deploy; if it is low, the instance is resized to 2 OCPU / 6 GB.
+Oracle reclaims idle Always Free instances when CPU, network and memory all stay under 20% at the 95th percentile for 7 days. Decision: the instance stays at 2 OCPU / 12 GB and does no artificial load. Memory use is checked after the first deploy and weekly after that. If Oracle sends an idle notice, or 7-day memory use stays near 20%, the instance is resized to 2 OCPU / 6 GB, which needs a reboot of a few minutes.
 
 ## Secrets
 
