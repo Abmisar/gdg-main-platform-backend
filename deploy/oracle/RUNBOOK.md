@@ -1,6 +1,6 @@
 # GDG on Campus UJ on Oracle ARM
 
-The backend repository owns this kit. One rootless Nest process runs the in-process schedulers, including the 15-second email poll. Next serves the public site and rewrites browser requests under /api to the public HTTPS API. Cloudflared reaches both by container name over the shared Podman bridge. Supabase and Resend remain the production services.
+The backend repository owns this kit. One Nest process runs the in-process schedulers, including the 15-second email poll. Next serves the public site and rewrites browser requests under /api to the public HTTPS API. Cloudflared reaches both by container name on an internal Docker network. An additional bridge provides outbound connectivity for the tunnel, API integrations and Next.js HTTPS rewrites. Supabase and Resend remain the production services.
 
 ## Provision the account and host
 
@@ -13,13 +13,13 @@ The backend repository owns this kit. One rootless Nest process runs the in-proc
 scp backend/deploy/oracle/bootstrap.sh ubuntu@HOST:/tmp/gdg-bootstrap.sh
 ssh ubuntu@HOST 'sudo bash /tmp/gdg-bootstrap.sh ADMIN_IP/32'
 for repo in backend frontend; do
-  git -C "$repo" bundle create "/tmp/gdg-$repo.bundle" deploy/oracle-podman
+  git -C "$repo" bundle create "/tmp/gdg-$repo.bundle" deploy/oracle-docker
   scp "/tmp/gdg-$repo.bundle" deploy@HOST:
-  ssh deploy@HOST "git clone -b deploy/oracle-podman gdg-$repo.bundle $repo"
+  ssh deploy@HOST "git clone -b deploy/oracle-docker gdg-$repo.bundle $repo"
 done
 ```
 
-Bootstrap configures an unprivileged deploy account, linger, SSH, UFW, fail2ban, unattended security updates, bounded journals and 2 GB of swap when needed. Compare `sudo ufw status verbose`, `sudo iptables-save` and OCI rules. Use an actual SSH login as deploy so the user systemd bus is available.
+Bootstrap installs Docker Engine, Buildx and the Compose plugin from the official ARM64 apt repository. The deploy account belongs to the docker group, which grants root-equivalent control of the host. Use a fresh SSH login for group membership. Bootstrap also configures linger, SSH, UFW, fail2ban, unattended security updates, bounded journals and 2 GB of swap when needed. Compare `sudo ufw status verbose`, `sudo iptables-save` and OCI rules. Use an actual SSH login as deploy so the user systemd bus is available.
 
 ## Configure providers and enter secrets
 
@@ -44,7 +44,9 @@ Confirm the existing Supabase schema matches these application commits, includin
 ```sh
 cd ~/backend/deploy/oracle
 ./release.sh
-systemctl --user status gdg-backend gdg-frontend gdg-tunnel gdg-backup.timer
+active="$HOME/.local/state/gdg/current"
+docker compose -p gdg-oracle --env-file "$active/tags.env" -f "$active/compose.yml" ps
+systemctl --user status gdg-backup.timer
 curl -fsS https://api.gdguj.org/health/live
 curl -fsS https://api.gdguj.org/health/ready
 curl -fsSL -o /dev/null https://gdguj.org/en
@@ -53,20 +55,19 @@ systemctl --user start gdg-backup.service
 journalctl --user -u gdg-backup.service -n 20
 ```
 
-Check OAuth and one real transactional email with a test member. In UptimeRobot create HTTPS monitors for the API readiness URL (200 requires a working database) and the public frontend, select the available free interval, configure an alert recipient and test notification delivery. After a reboot confirm the user services start without login. Check the backup journal after each release and confirm a recent complete.json in R2. Liveness alone does not test email, DNS rewrites, storage or backups.
+Check OAuth and one real transactional email with a test member. In UptimeRobot create HTTPS monitors for the API readiness URL (200 requires a working database) and the public frontend, select the available free interval, configure an alert recipient and test notification delivery. After a reboot confirm Docker restarted the containers and the user backup timer is active without login. Check the backup journal after each release and confirm a recent complete.json in R2. Liveness alone does not test email, DNS rewrites, storage or backups.
 
-For updates, transfer new bundles, fetch their deploy/oracle-podman refs in each clone and check out the intended detached commits. Record both SHAs and active image IDs. Run release.sh once. It builds both images before switching services. Keep old image tags and source bundles. Avoid unattended registry refreshes for this stack. Quadlets have no AutoUpdate label. Refresh the pinned cloudflared digest deliberately by passing docker.io/cloudflare/cloudflared@sha256:… to release.sh. Rebuild application images periodically for base image fixes. Keep a copy of current units and private configuration before changing them. If rollback is needed, restore the matching configuration and units, then run:
+For updates, transfer fresh bundles, fetch the deploy/oracle-docker ref in each clone and check out the intended commits. Run `./release.sh` as deploy. It pulls the pinned tunnel image, builds each application with a unique release tag, and runs Compose up with a three-minute health deadline. The singleton backend has a fixed container name. During replacement there can be a brief outage. Each container retains three rotated JSON logs of 10 MB each. Inspect a service with the same Compose arguments used for ps, followed by `logs --tail 100 backend`.
+
+A failed activation automatically attempts the last healthy release. For an explicit rollback, restore any corresponding private configuration and run:
 
 ```sh
-for name in backend frontend tunnel; do
-  podman tag "localhost/gdg-$name:previous" "localhost/gdg-$name:active"
-done
-systemctl --user daemon-reload
-systemctl --user restart gdg-backend gdg-frontend gdg-tunnel
+cd ~/backend/deploy/oracle
+./release.sh rollback
 curl -fsS https://api.gdguj.org/health/ready
 ```
 
-On first deployment there is no previous image. Stop the replacement backend before restarting the former deployment and reverting DNS. A later release replaces the previous tag. For older rollback use the recorded image IDs. Coordinate schema compatibility separately.
+The current and previous pointers under ~/.local/state/gdg retain the Compose files, image tags, connector digest and source SHAs. Keep their local images through the rollback window. Credentials and database migrations have separate recovery procedures. On first deployment a failed activation stops the candidate. Confirm it has stopped before restarting an older host. Update Docker packages during a maintenance window and redeploy periodically to pick up base-image fixes. Pass a reviewed docker.io/cloudflare/cloudflared@sha256:… digest to release.sh to update the connector. [Docker Engine installation](https://docs.docker.com/engine/install/ubuntu/)
 
 ## Restore a completed snapshot
 
@@ -86,8 +87,8 @@ python3 configure.py restore
 
 ## Fallback hosts and local verification
 
-**Hetzner**. Provision Ubuntu 24.04 ARM64 with the same SSH-only firewall. Supply the owner's public key in /home/ubuntu/.ssh/authorized_keys before bootstrap on a host with a different initial account. Follow this runbook using the new host and the same database and buckets. Stop the old backend and tunnel before starting the new units. The remotely managed tunnel routes can stay in place.
+**Hetzner**. Provision Ubuntu 24.04 ARM64 with the same SSH-only firewall. Supply the owner's public key in /home/ubuntu/.ssh/authorized_keys before bootstrap on a host with a different initial account. Follow this runbook using the new host and the same database and buckets. Stop the old backend and tunnel before starting the new Compose stack. The remotely managed tunnel routes can stay in place.
 
-**Fly.io**. Build both Containerfiles for linux/amd64 if required by the chosen Machines, preserving the frontend build arguments. Use one app for the API (internal port 3001) and one for the frontend (3000), with the same environment and custom HTTPS hostnames. Configure the API Machine count to one, disable automatic stops, and use a stop-before-start deployment strategy for workers. Move DNS and certificate validation to the Fly endpoints at cutover. A small separate Linux runner must continue the backup timer when using Fly Machines in place of the systemd host. Verify pricing before either fallback.
+**Fly.io**. Build the backend Dockerfile and frontend Dockerfile.oracle for linux/amd64 if required by the chosen Machines, preserving the frontend build arguments. Use one app for the API (internal port 3001) and one for the frontend (3000), with the same environment and custom HTTPS hostnames. Configure the API Machine count to one, disable automatic stops, and use a stop-before-start deployment strategy for workers. Move DNS and certificate validation to the Fly endpoints at cutover. A small separate Linux runner must continue the backup timer when using Fly Machines in place of the systemd host. Verify pricing before either fallback.
 
 **Mac**. Run ./smoke-kiri.sh from a Mac with Kiri started when the governor permits builds. It builds committed sources on the explicit Kiri context, uses a disposable database and checks API readiness and the frontend response. It publishes no host ports. The database fixture has no production records or scheduler migrations. Live provider acceptance tests require the owner's accounts.

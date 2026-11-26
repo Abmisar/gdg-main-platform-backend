@@ -5,7 +5,15 @@ test -s /home/ubuntu/.ssh/authorized_keys
 admin_cidr=${1:?pass administrator CIDR}
 python3 -c 'import ipaddress,sys; ipaddress.ip_network(sys.argv[1])' "$admin_cidr"
 apt-get update
-DEBIAN_FRONTEND=noninteractive apt-get install -y git podman uidmap slirp4netns fuse-overlayfs dbus-user-session netavark aardvark-dns ufw fail2ban unattended-upgrades python3-boto3 postgresql-client curl ca-certificates
+DEBIAN_FRONTEND=noninteractive apt-get install -y git dbus-user-session ufw fail2ban unattended-upgrades python3-boto3 postgresql-client curl ca-certificates
+test "$(dpkg --print-architecture)" = arm64
+install -d -m 0755 /etc/apt/keyrings
+curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc
+chmod 0644 /etc/apt/keyrings/docker.asc
+echo 'deb [arch=arm64 signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/ubuntu noble stable' > /etc/apt/sources.list.d/docker.list
+apt-get update
+apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+systemctl enable --now docker
 if ! command -v /usr/lib/postgresql/18/bin/pg_dump >/dev/null; then
   install -d /usr/share/postgresql-common/pgdg
   curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc
@@ -16,6 +24,7 @@ fi
 id deploy >/dev/null 2>&1 || adduser --disabled-password --gecos '' deploy
 install -d -o deploy -g deploy -m 700 /home/deploy/.ssh
 install -o deploy -g deploy -m 600 /home/ubuntu/.ssh/authorized_keys /home/deploy/.ssh/authorized_keys
+usermod -aG docker deploy
 loginctl enable-linger deploy
 systemctl start "user@$(id -u deploy).service"
 printf '%s\n' 'PasswordAuthentication no' 'KbdInteractiveAuthentication no' 'PermitRootLogin no' 'PubkeyAuthentication yes' > /etc/ssh/sshd_config.d/00-gdg.conf
