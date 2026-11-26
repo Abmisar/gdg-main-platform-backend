@@ -55,7 +55,7 @@ systemctl --user start gdg-backup.service
 journalctl --user -u gdg-backup.service -n 20
 ```
 
-Sign in as an authorized committee member, upload a supported image under 5 MiB to a test event, and confirm the returned public URL serves the image through the frontend CSP. Check OAuth and one real transactional email with a test member. In UptimeRobot create HTTPS monitors for the API readiness URL (200 requires a working database) and the public frontend, select the available free interval, configure an alert recipient and test notification delivery. After a reboot confirm Docker restarted the containers and the user backup timer is active without login. Check the backup journal after each release and confirm a recent complete.json in R2. Liveness alone does not test email, DNS rewrites, storage or backups.
+Sign in as an authorized committee member, upload a supported image under 5 MiB to a test event, and confirm the returned public URL serves the image through the frontend CSP. Check OAuth and one real transactional email with a test member. In UptimeRobot create HTTPS monitors for the API readiness URL (200 requires a working database) and the public frontend, select the available free interval, configure an alert recipient and test notification delivery. After a reboot confirm Docker restarted the containers and the user backup timer is active without login. Check the backup journal after each release and confirm a recent complete.json.age in R2. Liveness alone does not test email, DNS rewrites, storage or backups.
 
 For updates, transfer fresh bundles, fetch the deploy/oracle-docker ref in each clone and check out the intended commits. Run `./release.sh` as deploy. It pulls the pinned tunnel image, builds each application with a unique release tag, and runs Compose up with a three-minute health deadline. The singleton backend has a fixed container name. During replacement there can be a brief outage. Each container retains three rotated JSON logs of 10 MB each. Inspect a service with the same Compose arguments used for ps, followed by `logs --tail 100 backend`.
 
@@ -69,12 +69,20 @@ curl -fsS https://api.gdguj.org/health/ready
 
 The current and previous pointers under ~/.local/state/gdg retain the Compose files, image tags, connector digest and source SHAs. Keep their local images through the rollback window. Credentials and database migrations have separate recovery procedures. On first deployment a failed activation stops the candidate. Confirm it has stopped before restarting an older host. Update Docker packages during a maintenance window and redeploy periodically to pick up base-image fixes. Pass a reviewed docker.io/cloudflare/cloudflared@sha256:… digest to release.sh to update the connector. [Docker Engine installation](https://docs.docker.com/engine/install/ubuntu/)
 
+## Backup encryption keys
+
+On the owner’s Mac, install age and generate the identity offline: `age-keygen -o gdg-backup-identity.txt`. Record the public recipient printed by the command. Store the private identity file securely in the owner’s password manager or Keychain, and keep a recoverable offline copy. Give the operator only the public recipient; enter it as AGE_RECIPIENT when running `configure.py backup`. Never install the private identity on the backup server for normal operation. Backups fail closed without a recipient.
+
+For a restore drill, temporarily place the identity file on the restore machine with owner-only permissions (`chmod 600`), enter its absolute path as AGE_IDENTITY_FILE in `configure.py restore`, and follow the disposable project procedure below. Remove the temporary identity and decrypted restore scratch data afterward. Confirm that the drill restores representative database records and storage objects.
+
+To rotate, generate a new pair offline, preserve the new private identity securely, and update AGE_RECIPIENT in backup configuration for new backups. Retain the old identity until all backups encrypted to it expire after 14 days; use the identity matching the selected snapshot during restore.
+
 ## Restore a completed snapshot
 
-The timer runs at 00:30 UTC. It archives the database with pg_dump custom format, then copies all S3-visible storage objects and records bucket inventory, object keys, content headers and SHA-256 digests. complete.json is uploaded last. Reserve local scratch space for the larger of the dump and largest single object. Object uploads during a backup can race the database snapshot. For an exact cutover suspend storage writers and scheduled workers during the backup. Check the first backup on the real project for database permissions, bucket visibility and free-tier capacity.
+The timer runs at 00:30 UTC. It archives the database with pg_dump custom format, then copies all S3-visible storage objects and records bucket inventory, object keys, content headers and SHA-256 digests. Every object, including complete.json.age, is encrypted with age before upload. The encrypted completion manifest is uploaded last. Reserve scratch space for the largest encrypted object during backup and the full decrypted snapshot during restore. Object uploads during a backup can race the database snapshot. For an exact cutover suspend storage writers and scheduled workers during the backup. Check the first backup on the real project for database permissions, bucket visibility and free-tier capacity.
 
 1. Create a **fresh disposable Supabase project** with matching PostgreSQL major, extensions and managed roles. Keep writers and backend workers offline. Create destination S3 credentials. Use the target session/direct DB parameters and target storage credentials in restore.env, with read access to the **source R2 bucket**.
-2. Identify a prefix under snapshots/ with complete.json, still within retention. Use only the ID between the slashes.
+2. Identify a prefix under snapshots/ with complete.json.age, still within retention. Use only the ID between the slashes.
 
 ```sh
 cd ~/backend/deploy/oracle
@@ -82,7 +90,7 @@ python3 configure.py restore
 ./restore.sh SNAPSHOT_ID
 ```
 
-3. The script verifies payload checksums, restores the public application schema (including Better Auth), restores storage bucket definitions and uploads files through Supabase S3 so its object catalog stays consistent. It rejects occupied destinations. A failure can leave partial data. Start the drill again with a fresh target. The full dump is available for selective recovery of custom schemas, database policies and managed-schema customizations using pg_restore --list and --use-list. Reapply any project-specific storage policies, object ownership requirements and dashboard settings before permitting clients. Supabase-managed roles, provider secrets and project settings require separate recovery.
+3. The script decrypts and authenticates every payload and verifies checksums before making changes, restores the public application schema (including Better Auth), restores storage bucket definitions and uploads files through Supabase S3 so its object catalog stays consistent. It rejects occupied destinations. A failure can leave partial data. Start the drill again with a fresh target. The full dump is available for selective recovery of custom schemas, database policies and managed-schema customizations using pg_restore --list and --use-list. Reapply any project-specific storage policies, object ownership requirements and dashboard settings before permitting clients. Supabase-managed roles, provider secrets and project settings require separate recovery.
 4. Compare source snapshot counts against restored memberships, events, auth records and bucket objects. Check MIME types, public/private access and a representative download. Point a **single** backend at the recovered project when ready to cut over. Do not start a second scheduler against production data. Test external readiness and sign-in before changing public routes.
 
 ## Fallback hosts and local verification

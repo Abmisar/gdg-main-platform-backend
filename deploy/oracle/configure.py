@@ -26,6 +26,8 @@ def main():
                 if not (first == 10 or first == 172 and 16 <= second <= 31 or
                         first == 192 and second == 168):
                     raise ValueError("Choose a free RFC 1918 /24 prefix")
+            if key == "AGE_IDENTITY_FILE=" and not os.path.isabs(value):
+                raise ValueError("Use an absolute identity file path")
             if key == "API_PROXY_TARGET=" and value != "http://gdg-backend:3001":
                 raise ValueError("Use the internal Oracle backend origin")
             if not value or any(c in value for c in "\r\n\0") or value != value.strip() or any(c in value for c in "'\"\\"):

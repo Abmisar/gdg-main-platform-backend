@@ -38,18 +38,50 @@ def db(*command):
     return subprocess.check_output(command, text=True).strip()
 
 
+def encrypt(source, path, recipient):
+    with path.open("wb") as output:
+        process = subprocess.Popen(["age", "-r", recipient], stdin=subprocess.PIPE, stdout=output)
+        try:
+            for chunk in iter(lambda: source.read(1024 * 1024), b""):
+                process.stdin.write(chunk)
+            process.stdin.close()
+            if process.wait() != 0:
+                raise RuntimeError("Encryption failed")
+        except BaseException:
+            process.stdin.close()
+            process.wait()
+            raise
+
+
+def decrypt(source, destination):
+    with destination.open("wb") as output:
+        subprocess.run(["age", "-d", "-i", os.environ["AGE_IDENTITY_FILE"], str(source)], stdout=output, check=True)
+
+
 def backup(storage, vault, bucket, tmp):
+    recipient = os.environ.get("AGE_RECIPIENT", "").strip()
+    if not recipient:
+        raise ValueError("AGE_RECIPIENT is required")
     stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     prefix = f"snapshots/{stamp}-{uuid4().hex}/"
     index = {"files": [], "buckets": []}
-    path = tmp / "payload"
+    path = tmp / "payload.age"
 
-    def save(key, **attrs):
+    def save(key, source, **attrs):
+        encrypt(source, path, recipient)
+        key += ".age"
         vault.upload_file(str(path), bucket, prefix + key)
         index["files"].append(dict(key=key, sha256=digest(path), **attrs))
 
-    db("pg_dump", "-Fc", "-f", str(path))
-    save("database.dump")
+    binary = Path("/usr/lib/postgresql/18/bin/pg_dump")
+    process = subprocess.Popen([str(binary) if binary.exists() else "pg_dump", "-Fc"], stdout=subprocess.PIPE)
+    try:
+        save("database.dump", process.stdout)
+    finally:
+        process.stdout.close()
+        status = process.wait()
+    if status:
+        raise RuntimeError("pg_dump failed")
     for entry in storage.list_buckets()["Buckets"]:
         name = entry["Name"]
         index["buckets"].append(name)
@@ -58,14 +90,14 @@ def backup(storage, vault, bucket, tmp):
             for obj in page.get("Contents", []):
                 key = obj["Key"]
                 res = storage.get_object(Bucket=name, Key=key)
-                with path.open("wb") as stream, res["Body"] as body:
-                    while chunk := body.read(1024 * 1024):
-                        stream.write(chunk)
-                if path.stat().st_size != res["ContentLength"]:
-                    raise RuntimeError("Incomplete storage download")
                 headers = {k: res[k] for k in ("ContentType", "CacheControl", "ContentDisposition", "ContentEncoding", "Metadata") if k in res}
-                save(f"objects/{len(index['files'])}", storage_bucket=name, object_key=key, headers=headers)
-    vault.put_object(Bucket=bucket, Key=prefix + "complete.json", Body=json.dumps(index).encode())
+                with res["Body"] as body:
+                    save(f"objects/{len(index['files'])}", body, storage_bucket=name, object_key=key, headers=headers)
+                    if body.tell() != res["ContentLength"]:
+                        raise RuntimeError("Incomplete storage download")
+    import io
+    encrypt(io.BytesIO(json.dumps(index).encode()), path, recipient)
+    vault.upload_file(str(path), bucket, prefix + "complete.json.age")
     print(prefix)
 
 
@@ -73,18 +105,23 @@ def restore(storage, vault, bucket, tmp, snapshot):
     if not re.fullmatch(r"[0-9]{8}T[0-9]{6}Z-[a-f0-9]{32}", snapshot):
         raise ValueError("Invalid snapshot ID")
     prefix = "snapshots/" + snapshot + "/"
-    index = json.loads(vault.get_object(Bucket=bucket, Key=prefix + "complete.json")["Body"].read())
+    encrypted = tmp / "payload.age"
+    manifest = tmp / "manifest"
+    vault.download_file(bucket, prefix + "complete.json.age", str(encrypted))
+    decrypt(encrypted, manifest)
+    index = json.loads(manifest.read_text())
     occupied = db("psql", "-XAt", "-v", "ON_ERROR_STOP=1", "-c",
                   "select exists(select from pg_class where relnamespace='public'::regnamespace and relkind in ('r','p','v','m','S')) or exists(select from storage.buckets)")
     if occupied != "f" or storage.list_buckets()["Buckets"]:
         raise RuntimeError("Restore requires an empty project")
-    path = tmp / "payload"
-    for item in index["files"]:
-        key = item["key"]
-        vault.download_file(bucket, prefix + key, str(path))
-        if digest(path) != item["sha256"]:
+    for number, item in enumerate(index["files"]):
+        vault.download_file(bucket, prefix + item["key"], str(encrypted))
+        if digest(encrypted) != item["sha256"]:
             raise RuntimeError("Archive checksum mismatch")
-        if key == "database.dump":
+        decrypt(encrypted, tmp / str(number))
+    for number, item in enumerate(index["files"]):
+        path = tmp / str(number)
+        if item["key"] == "database.dump.age":
             common = ["pg_restore", "--exit-on-error", "--single-transaction", "--no-owner",
                       "--dbname=" + os.environ["PGDATABASE"]]
             db(*common, "--schema=public", str(path))
