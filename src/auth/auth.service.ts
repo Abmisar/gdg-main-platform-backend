@@ -1,13 +1,12 @@
 import { randomUUID } from 'node:crypto';
 import type { RequestSetupLinkDto } from './setup-password.dto.js';
-import { BadRequestException, ConflictException, Inject, Injectable, UnauthorizedException } from '@nestjs/common';
+import { BadRequestException, ConflictException, Inject, Injectable, Logger, UnauthorizedException } from '@nestjs/common';
 import { Prisma } from '../generated/prisma/client.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { BetterAuthService } from './better-auth.service.js';
 import { approvalScopeFor, findApplicableCommittees } from '../committees/committee-catalog.js';
 import type { RequestUser } from './auth.guard.js';
 import type { SignupDto } from './signup.dto.js';
-import type { CheckEmailDto } from './check-email.dto.js';
 import type { GoogleSignupCompletionDto } from './google-auth.dto.js';
 import type { UpdateSocialLinksDto } from './update-social-links.dto.js';
 
@@ -49,16 +48,12 @@ function assertExternalUniversityBranch(
 
 @Injectable()
 export class AuthService {
+  private readonly logger = new Logger(AuthService.name);
+
   constructor(
     @Inject(PrismaService) private readonly prisma: PrismaService,
     @Inject(BetterAuthService) private readonly better: BetterAuthService,
   ) {}
-
-  async checkEmail({ email }: CheckEmailDto) {
-    const person = await this.findPersonByEmail(email.trim().toLowerCase());
-    if (!person) return { nextStep: 'SIGNUP_REQUIRED' };
-    return { nextStep: person.authUserId ? 'PASSWORD_REQUIRED' : 'PASSWORD_SETUP_REQUIRED' };
-  }
 
   async requestPasswordReset({ email, locale = 'en' }: RequestSetupLinkDto) {
     const normalized = email.trim().toLowerCase();
@@ -70,7 +65,7 @@ export class AuthService {
         create: { id: randomUUID(), email: normalized, name: person.fullName, emailVerified: false, locale }, update: {} });
     }
     await this.better.auth.api.requestPasswordReset({ body: { email: normalized,
-      redirectTo: `${process.env.FRONTEND_URL ?? 'http://localhost:3000'}/${locale}/reset-password` } });
+      redirectTo: new URL(`/${locale}/reset-password`, process.env.FRONTEND_URL ?? 'http://localhost:3000').href } });
   }
 
   async signup(input: SignupDto) {
@@ -81,24 +76,49 @@ export class AuthService {
     if (universityEmail?.trim().toLowerCase() === normalizedEmail) throw new BadRequestException('Personal and university emails must be different.', { errorCode: 'EMAILS_MUST_DIFFER' });
     if (registrationType === 'MEMBER' && !committees.length && !requestedGlobalRoles.length) throw new BadRequestException('Select at least one committee or leadership role.');
     if (!(await findApplicableCommittees(this.prisma, committees.map(item => item.committeeCode)))) throw committeeUnavailable();
-    if (await this.findPersonByEmail(normalizedEmail)) throw emailAlreadyExists();
-    if (await this.prisma.authUser.findUnique({ where: { email: normalizedEmail } })) throw emailAlreadyExists();
-    const result = await this.better.auth.api.signUpEmail({ body: {
-      email: normalizedEmail, password, name: fullName.trim(), locale,
-      callbackURL: `${process.env.FRONTEND_URL ?? 'http://localhost:3000'}/${locale}/verify-email`,
-    } });
-    if (!result.user) throw emailAlreadyExists();
-    // Only auth credentials exist before verification. Profile and requested roles remain staged.
-    try {
-      await this.prisma.signupVerification.create({ data: {
-        authUserId: result.user.id, fullName: fullName.trim(), emailPersonal: normalizedEmail,
+    const name = fullName.trim();
+    const credentials = this.better.auth.api.signUpEmail.options.body.safeParse({ name, email: normalizedEmail, password });
+    if (!credentials.success) throw new BadRequestException('Invalid signup credentials.');
+    const { password: passwordPolicy } = await this.better.auth.$context;
+    if (password.length < passwordPolicy.config.minPasswordLength || password.length > passwordPolicy.config.maxPasswordLength) {
+      throw new BadRequestException('Password length is outside the supported range.');
+    }
+    const passwordHash = await passwordPolicy.hash(password);
+    const authUserId = randomUUID();
+    const created = await this.prisma.$transaction(async tx => {
+      const person = await tx.person.findFirst({
+        where: { emailPersonal: { equals: normalizedEmail, mode: 'insensitive' } },
+        select: { personId: true },
+      });
+      if (person) return false;
+
+      const staged = await tx.signupVerification.findUnique({
+        where: { emailPersonal: normalizedEmail },
+        select: { signupVerificationId: true },
+      });
+      if (staged) return false;
+      const identity = await tx.authUser.createMany({
+        data: { id: authUserId, email: normalizedEmail, name, emailVerified: false, locale },
+        skipDuplicates: true,
+      });
+      if (!identity.count) return false;
+
+      await tx.authAccount.create({
+        data: { id: randomUUID(), userId: authUserId, providerId: 'credential', accountId: authUserId, password: passwordHash },
+      });
+      await tx.signupVerification.create({ data: {
+        authUserId, fullName: name, emailPersonal: normalizedEmail,
         emailUniversity: universityEmail?.trim().toLowerCase() ?? null, registrationType,
         applicationData: JSON.parse(JSON.stringify(applicationData)), committees: JSON.parse(JSON.stringify(committees)),
         globalRoles: JSON.parse(JSON.stringify(requestedGlobalRoles)), expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000),
       } });
-    } catch (error) {
-      await this.prisma.authUser.delete({ where: { id: result.user.id } });
-      throw error;
+      return true;
+    });
+    if (created) {
+      void this.better.auth.api.sendVerificationEmail({ body: {
+        email: normalizedEmail,
+        callbackURL: new URL(`/${locale}/verify-email`, process.env.FRONTEND_URL ?? 'http://localhost:3000').href,
+      } }).catch(() => this.logger.warn({ event: 'signup_verification_request_failed' }));
     }
     return { emailVerificationRequired: true };
   }

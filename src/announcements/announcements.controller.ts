@@ -1,9 +1,20 @@
-import { Body, Controller, Delete, Get, Inject, Param, ParseIntPipe, Patch, Post, UploadedFile, UseGuards, UseInterceptors } from '@nestjs/common';
-import { FileInterceptor } from '@nestjs/platform-express';
+import { Body, type CanActivate, Controller, type ExecutionContext, Delete, Get, Inject, Injectable, Param, ParseIntPipe, Patch, Post, UploadedFile, UseGuards, UseInterceptors } from '@nestjs/common';
+import { ImageUploadInterceptor, ImageUploadLengthGuard } from '../common/http/image-upload.js';
 import { AuthRequiredGuard, CurrentUser, type AuthenticatedUser } from '../auth/current-user.js';
 import { apiSuccess } from '../common/http/api-response.js';
 import { CreateAnnouncementDto, UpdateAnnouncementDto } from './announcement.dto.js';
 import { AnnouncementsService } from './announcements.service.js';
+
+@Injectable()
+export class AnnouncementImageGuard implements CanActivate {
+  constructor(@Inject(AnnouncementsService) private readonly announcements: AnnouncementsService) {}
+
+  async canActivate(context: ExecutionContext): Promise<boolean> {
+    const { user } = context.switchToHttp().getRequest<{ user: AuthenticatedUser }>();
+    await this.announcements.requireManager(user);
+    return true;
+  }
+}
 
 @Controller('announcements')
 export class AnnouncementsController {
@@ -21,11 +32,8 @@ export class AnnouncementsController {
   }
 
   @Post('images')
-  @UseGuards(AuthRequiredGuard)
-  @UseInterceptors(FileInterceptor('file', {
-    limits: { fileSize: 5 * 1024 * 1024 },
-    fileFilter: (_request, file, callback) => callback(null, ['image/jpeg', 'image/png', 'image/webp', 'image/gif'].includes(file.mimetype)),
-  }))
+  @UseGuards(AuthRequiredGuard, AnnouncementImageGuard, ImageUploadLengthGuard)
+  @UseInterceptors(ImageUploadInterceptor)
   async uploadImage(
     @CurrentUser() user: AuthenticatedUser,
     @UploadedFile() file: { buffer: Buffer; mimetype: string; size: number } | undefined,

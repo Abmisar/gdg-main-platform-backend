@@ -31,7 +31,7 @@ Repository SQL search found no `auth.uid()` policies, no FK to `auth.users`, and
 
 ## Supabase usage that stays
 
-`src/committee-dashboard/committee-event-image-storage.service.ts` uses Supabase Storage with the backend service key. Keep its SDK dependency, bucket, upload/delete behavior, URL and storage credentials. Prisma/Postgres remains the database, including any hosted Supabase Postgres deployment. Do not drop schemas, tables, policies, buckets or existing migration history. Frontend Supabase SDK can be removed once all OAuth calls are replaced.
+`src/committee-dashboard/committee-event-image-storage.service.ts` uses Supabase Storage with a publishable key and a scoped asset-upload token. Preserve existing URLs and provision the dedicated upload bucket as described in [backend setup](../SETUP.md). Prisma/Postgres remains the database, including any hosted Supabase Postgres deployment. Do not drop schemas, tables, policies, buckets or existing migration history. Frontend Supabase SDK can be removed once all OAuth calls are replaced.
 
 ## Target design
 

@@ -69,7 +69,3 @@ export function confirmationExpired(): ConflictException {
     errorCode: 'CONFIRMATION_EXPIRED',
   });
 }
-
-export function notYourRegistration(): ForbiddenException {
-  return new ForbiddenException('This registration belongs to someone else.');
-}

@@ -324,19 +324,17 @@ describe('confirming and declining a seat', () => {
     );
   });
 
-  it("answers 403 when someone confirms or declines another person's registration", async () => {
+  it('uses the same missing-resource response for unavailable registration actions', async () => {
     const { registrationId } = await offeredSeat();
-    const stranger = await createPerson();
+    const otherPerson = await createPerson();
 
-    await as(stranger)
-      .post(`/registrations/${registrationId}/confirm`)
-      .expect(403);
-    await as(stranger)
-      .post(`/registrations/${registrationId}/decline`)
-      .expect(403);
-    expect((await statusOf(registrationId)).status).toBe(
-      RegistrationStatus.AWAITING_CONFIRMATION,
-    );
+    for (const action of ['confirm', 'decline']) {
+      const missing = await as(otherPerson).post(`/registrations/2147483647/${action}`).expect(404);
+      const unavailable = await as(otherPerson).post(`/registrations/${registrationId}/${action}`).expect(404);
+      expect(unavailable.body).toEqual(missing.body);
+      expect(unavailable.body.error.code).toBe('REGISTRATION_NOT_FOUND');
+    }
+    expect((await statusOf(registrationId)).status).toBe(RegistrationStatus.AWAITING_CONFIRMATION);
   });
 
   it('declining an offered seat promotes waitlist #1', async () => {
@@ -477,7 +475,7 @@ describe('POST /events/:eventId/check-in', () => {
       const first = await as(undefined)
         .get(path)
         .set(workerHeaders)
-        .expect('Cache-Control', 'no-store')
+        .expect('Cache-Control', 'private, no-store')
         .expect(200);
       expect(first.body).toMatchObject({ active: true, barcode: token });
       expect(first.body).not.toHaveProperty('email');

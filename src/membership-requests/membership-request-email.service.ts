@@ -1,4 +1,5 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
+import { randomUUID } from 'node:crypto';
 import { SmtpEmailService } from '../common/email/smtp-email.service.js';
 
 export type MembershipDecisionEmailKind = 'APPROVED' | 'REJECTED';
@@ -35,32 +36,22 @@ export class MembershipRequestEmailService {
   ) {}
 
   async sendDecisionEmail(email: MembershipDecisionEmail): Promise<void> {
+    const deliveryId = randomUUID();
     if (!email.to) {
       this.logger.warn({
         event: 'membership_decision_email_skipped',
         reason: 'NO_EMAIL_ADDRESS',
-        decision: email.decision,
-        recipientName: email.recipientName,
+        deliveryId,
       });
       return;
     }
 
-    if (!this.smtp.isConfigured()) {
-      this.logger.warn({
-        event: 'membership_decision_email_skipped',
-        reason: 'SMTP_NOT_CONFIGURED',
-        decision: email.decision,
-        recipientName: email.recipientName,
-      });
-      return;
-    }
     const from = this.smtp.getFromAddress();
-    if (!from) {
+    if (!from || !this.smtp.isConfigured()) {
       this.logger.warn({
         event: 'membership_decision_email_skipped',
         reason: 'SMTP_NOT_CONFIGURED',
-        decision: email.decision,
-        recipientName: email.recipientName,
+        deliveryId,
       });
       return;
     }
@@ -126,9 +117,7 @@ export class MembershipRequestEmailService {
     await this.smtp.sendMail({ from, to: email.to, subject, text, html });
     this.logger.log({
       event: 'membership_decision_email_sent',
-      decision: email.decision,
-      recipientName: email.recipientName,
-      targetName,
+      deliveryId,
     });
   }
 }

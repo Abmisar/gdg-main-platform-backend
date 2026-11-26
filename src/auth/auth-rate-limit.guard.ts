@@ -1,3 +1,4 @@
+import { clientIp } from '../common/http/client-ip.js';
 import { createHmac } from 'node:crypto';
 import {
   type CanActivate,
@@ -119,7 +120,7 @@ export class AuthRateLimitGuard implements CanActivate {
     dimension: RateLimitDimension,
   ): string | undefined {
     if (dimension === 'ip') {
-      return request.ip || request.socket?.remoteAddress || 'unknown';
+      return clientIp(request);
     }
     if (dimension === 'email') {
       const email = request.body?.email;

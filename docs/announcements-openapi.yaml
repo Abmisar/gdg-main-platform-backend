@@ -65,16 +65,23 @@ paths:
     post:
       operationId: uploadAnnouncementImage
       summary: Upload an announcement image
-      description: Requires announcements.manage. Accepts JPEG, PNG, WebP, or GIF up to 5 MB.
+      description: Requires announcements.manage. Send exactly one JPEG, PNG, WebP, or GIF up to 5 MiB and no text fields.
       security:
         - bearerAuth: []
         - accessCookie: []
+      parameters:
+        - name: Content-Length
+          in: header
+          required: true
+          description: Size in bytes of the complete multipart body, including its boundary and headers.
+          schema: { type: integer, minimum: 1, maximum: 5259264 }
       requestBody:
         required: true
         content:
           multipart/form-data:
             schema:
               type: object
+              additionalProperties: false
               required: [file]
               properties:
                 file: { type: string, format: binary }
@@ -88,6 +95,8 @@ paths:
         '400': { description: Invalid image file. }
         '401': { description: Authentication required. }
         '403': { description: Caller lacks group leadership publishing permission. }
+        '411': { description: Content-Length is required. Chunked uploads are unsupported. }
+        '413': { description: Image exceeds 5 MiB or the complete multipart body exceeds 5259264 bytes. }
         '502': { description: Image storage is unavailable. }
   /announcements/{identifier}:
     patch:

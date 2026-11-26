@@ -6,6 +6,7 @@ import { AuthGuard } from './auth.guard.js';
 import { AuthRateLimitGuard } from './auth-rate-limit.guard.js';
 import { AuthService } from './auth.service.js';
 import { BetterAuthService } from './better-auth.service.js';
+import { SignupRetentionReport } from './signup-retention-report.js';
 import { ResendAuthEmailService } from './email/resend-auth-email.service.js';
 
 @Module({
@@ -14,6 +15,7 @@ import { ResendAuthEmailService } from './email/resend-auth-email.service.js';
   providers: [
     BetterAuthService,
     ResendAuthEmailService,
+    SignupRetentionReport,
     AuthService,
     { provide: APP_GUARD, useClass: AuthRateLimitGuard },
     { provide: APP_GUARD, useClass: AuthGuard },

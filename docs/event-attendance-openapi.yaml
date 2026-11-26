@@ -33,7 +33,17 @@ paths:
                       attendanceMethod: { $ref: '#/components/schemas/AttendanceMethod' }
                       attendanceToken: { type: string }
                       attendanceQrCodeDataUrl: { type: string, format: uri }
-        '403': { description: Registration belongs to another account. }
+        '404': { description: 'REGISTRATION_NOT_FOUND. The registration is missing or unavailable to this account.' }
+        '409': { description: Seat is unavailable, expired, or the event has started. }
+  /registrations/{registrationId}/decline:
+    parameters:
+      - $ref: '#/components/parameters/RegistrationId'
+    post:
+      security: [{ accessCookie: [] }]
+      summary: Decline the signed-in attendee's registration
+      responses:
+        '200': { description: Registration ID and updated status. }
+        '404': { description: 'REGISTRATION_NOT_FOUND. The registration is missing or unavailable to this account.' }
         '409': { description: Seat is unavailable, expired, or the event has started. }
   /events/{eventId}/check-in:
     parameters:

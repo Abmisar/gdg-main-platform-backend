@@ -45,13 +45,15 @@ export class SmtpEmailService {
     const port = Number(this.config.get<string>('SMTP_PORT') ?? 465);
     const user = this.config.get<string>('SMTP_USER');
     const pass = this.config.get<string>('SMTP_PASS')?.replace(/\s+/g, '');
-    if (!host || !Number.isInteger(port) || !user || !pass) {
+    if (!host || !Number.isInteger(port) || port < 1 || port > 65535 || !user || !pass) {
       return null;
     }
     return {
       host,
       port,
       secure: port === 465,
+      requireTLS: port !== 465,
+      tls: { rejectUnauthorized: true },
       connectionTimeout: 15_000,
       socketTimeout: 45_000,
       auth: { user, pass },

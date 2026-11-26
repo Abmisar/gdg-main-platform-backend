@@ -41,16 +41,30 @@ describe('Better Auth through Nest HTTP', () => {
   it('stages signup, requires verification, serves authenticated profile and revokes logout', async () => {
     const http = request(app.getHttpServer());
     await http.get('/me').expect(401);
-    await http.post('/account/signup').set('Origin', 'http://localhost:3000').send({
+    const input = {
       fullName: 'Synthetic Nest signup', email, password: 'local-e2e-password', locale: 'en', registrationType: 'NON_MEMBER',
       applicationData: { phoneNumber: '0500000000', university: 'University of Jeddah', college: 'Computing', major: 'CS', level: '1', gender: 'female' },
-    }).expect(201);
+    };
+    const lookup = () => http.post('/account/check-email').send({ email }).expect(200);
+    expect((await lookup()).body.data).toEqual({ nextStep: 'PASSWORD_REQUIRED' });
+    await http.post('/api/auth/sign-up/email').set('Origin', 'http://localhost:3000').send(input).expect(404);
+    const signup = () => http.post('/account/signup').set('Origin', 'http://localhost:3000');
+    const receipt = (await signup().send(input).expect(201)).body;
+    expect(receipt).toEqual({ success: true, message: 'OK', error: null, data: { emailVerificationRequired: true } });
+    await vi.waitFor(() => expect(sent.some(message => message.kind === 'verification' && message.to === email)).toBe(true));
+    const duplicate = await signup().send({ ...input, fullName: 'Duplicate submission', password: 'other-example-password' }).expect(201);
+    expect(duplicate.body).toEqual(receipt);
+    expect(sent.filter(message => message.kind === 'verification' && message.to === email)).toHaveLength(1);
     await http.post('/api/auth/sign-in/email').set('Origin', 'http://localhost:3000').send({ email, password: 'local-e2e-password' }).expect(403);
     const link = new URL(sent.find(message => message.kind === 'verification')!.url);
     await http.get(link.pathname + link.search).expect(302);
     const login = await http.post('/api/auth/sign-in/email').set('Origin', 'http://localhost:3000').send({ email, password: 'local-e2e-password' }).expect(200);
     const cookie = (login.headers['set-cookie'] as unknown as string[]).map(value => value.split(';')[0]).join('; ');
-    const profile = await http.get('/me').set('Cookie', cookie).expect(200);
+    const profile = await http.get('/me').set('Cookie', cookie).expect(200).expect('Cache-Control', 'private, no-store');
+    await http.get('/api/auth/get-session').set('Cookie', cookie).expect(200).expect('Cache-Control', 'private, no-store');
+    await http.get('/api/auth/get-session').expect(200).expect('Cache-Control', 'private, no-store');
+    expect((await lookup()).body.data).toEqual({ nextStep: 'PASSWORD_REQUIRED' });
+    expect(profile.body.data.fullName).toBe(input.fullName);
     expect(profile.body.data.email).toBe(email);
     expect(profile.body.data.roles).toEqual([]);
     expect(profile.body.data.memberId).toBeNull();

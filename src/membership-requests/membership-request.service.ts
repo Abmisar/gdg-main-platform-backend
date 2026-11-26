@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import {
   ConflictException,
   ForbiddenException,
@@ -278,8 +279,6 @@ export class MembershipRequestService {
           outcome.email.requestedRole,
           outcome.email.status,
         ),
-      outcome.email.status,
-      outcome.email.committeeName,
     );
     return outcome.response;
   }
@@ -428,8 +427,6 @@ export class MembershipRequestService {
           outcome.email.requestedRole,
           decision,
         ),
-      decision,
-      outcome.email.committeeName,
     );
     return outcome.response;
   }
@@ -506,8 +503,6 @@ export class MembershipRequestService {
           outcome.email.roleName,
           decision,
         ),
-      decision,
-      outcome.email.roleName,
     );
     return outcome.response;
   }
@@ -607,45 +602,10 @@ export class MembershipRequestService {
     });
   }
 
-  private dispatchDecisionEmail(
-    send: () => Promise<void>,
-    decision: MembershipCommitteeDecision,
-    targetName: string,
-  ) {
+  private dispatchDecisionEmail(send: () => Promise<void>) {
     void Promise.resolve()
       .then(send)
-      .catch((error: unknown) => {
-        const details =
-          error instanceof Error
-            ? {
-                errorName: error.name,
-                errorMessage: error.message,
-                errorCode:
-                  'code' in error && typeof error.code === 'string'
-                    ? error.code
-                    : undefined,
-                smtpResponseCode:
-                  'responseCode' in error && typeof error.responseCode === 'number'
-                    ? error.responseCode
-                    : undefined,
-                smtpCommand:
-                  'command' in error && typeof error.command === 'string'
-                    ? error.command
-                    : undefined,
-                smtpResponse:
-                  'response' in error && typeof error.response === 'string'
-                    ? error.response
-                    : undefined,
-              }
-            : { errorName: 'unknown', errorMessage: String(error) };
-
-        this.logger.error({
-          event: 'membership_decision_email_dispatch_failed',
-          decision,
-          targetName,
-          ...details,
-        });
-      });
+      .catch(() => this.logger.error({ event: 'membership_decision_email_dispatch_failed' }));
   }
   private async sendCommitteeDecisionEmail(
     request: {
@@ -674,16 +634,8 @@ export class MembershipRequestService {
         committeeName,
         roleName: requestedRole,
       });
-    } catch (error) {
-      this.logger.error({
-        event: 'membership_decision_email_failed',
-        decision,
-        targetName: committeeName,
-        error:
-          error instanceof Error
-            ? error.message
-            : 'Unknown email delivery error',
-      });
+    } catch {
+      this.logger.error({ event: 'membership_decision_email_failed', deliveryId: randomUUID() });
     }
   }
 
@@ -713,16 +665,8 @@ export class MembershipRequestService {
         globalRoleName: roleName,
         roleName,
       });
-    } catch (error) {
-      this.logger.error({
-        event: 'membership_decision_email_failed',
-        decision,
-        targetName: roleName,
-        error:
-          error instanceof Error
-            ? error.message
-            : 'Unknown email delivery error',
-      });
+    } catch {
+      this.logger.error({ event: 'membership_decision_email_failed', deliveryId: randomUUID() });
     }
   }
 

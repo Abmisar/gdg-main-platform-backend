@@ -1,11 +1,10 @@
-import { BadGatewayException, BadRequestException, Injectable, Logger } from '@nestjs/common';
+import { BadGatewayException, BadRequestException, Inject, Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import { randomUUID } from 'node:crypto';
+import { decodeJwt } from 'jose';
+import { IMAGE_TYPES, MAX_IMAGE_BYTES } from '../common/http/image-upload.js';
 
-const BUCKET = 'event-images';
-const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
-const IMAGE_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/gif']);
 const EXTENSION_BY_TYPE: Record<string, string> = {
   'image/jpeg': 'jpg',
   'image/png': 'png',
@@ -32,9 +31,8 @@ function matchesImageSignature(buffer: Buffer, mimetype: string) {
 export class CommitteeEventImageStorageService {
   private readonly logger = new Logger(CommitteeEventImageStorageService.name);
   private client?: SupabaseClient;
-  private bucketReady?: Promise<void>;
 
-  constructor(private readonly config: ConfigService) {}
+  constructor(@Inject(ConfigService) private readonly config: ConfigService) {}
 
   async upload(file: { buffer: Buffer; mimetype: string; size: number }) {
     return this.uploadToPath(file);
@@ -54,84 +52,59 @@ export class CommitteeEventImageStorageService {
     ) {
       throw new BadRequestException('Choose a JPEG, PNG, WebP, or GIF image up to 5 MB.');
     }
+    const bucketId = this.config.get<string>('SUPABASE_ASSET_BUCKET') ?? 'event-images';
+    if (!/^[a-z0-9][a-z0-9-]{0,62}$/.test(bucketId)) {
+      throw new BadGatewayException('Event image storage is unavailable.');
+    }
     const client = this.getClient();
-    await this.ensureBucket(client);
+    const { data: bucket, error: bucketError } = await client.storage.getBucket(bucketId);
+    const allowedTypes = bucket?.allowed_mime_types;
+    if (
+      bucketError || bucket?.id !== bucketId || bucket.name !== bucketId || bucket.public !== true
+      || bucket.file_size_limit !== MAX_IMAGE_BYTES
+      || !Array.isArray(allowedTypes)
+      || allowedTypes.length !== IMAGE_TYPES.size
+      || ![...IMAGE_TYPES].every((type) => allowedTypes.includes(type))
+    ) {
+      this.logger.error({ event: 'event_image_storage_failed', operation: 'check_bucket' });
+      throw new BadGatewayException('Event image storage is unavailable.');
+    }
     const objectName = `${randomUUID()}.${EXTENSION_BY_TYPE[file.mimetype]}`;
     const objectPath = folder ? `${folder}/${objectName}` : objectName;
-    const { error } = await client.storage.from(BUCKET).upload(objectPath, file.buffer, {
+    const { error } = await client.storage.from(bucketId).upload(objectPath, file.buffer, {
       contentType: file.mimetype,
       cacheControl: '31536000',
       upsert: false,
     });
     if (error) {
-      this.logStorageError('upload', error);
+      this.logger.error({ event: 'event_image_storage_failed', operation: 'upload' });
       throw new BadGatewayException('The event image could not be stored.');
     }
-    return { imageUrl: client.storage.from(BUCKET).getPublicUrl(objectPath).data.publicUrl };
+    return { imageUrl: client.storage.from(bucketId).getPublicUrl(objectPath).data.publicUrl };
   }
 
   private getClient() {
+    if (this.client) return this.client;
     try {
-      this.client ??= createClient(
-        this.config.getOrThrow<string>('SUPABASE_URL'),
-        this.config.get<string>('SUPABASE_SECRET_KEY')
-          ?? this.config.getOrThrow<string>('SUPABASE_SERVICE_ROLE_KEY'),
-        { auth: { persistSession: false, autoRefreshToken: false } },
-      );
+      const key = this.config.getOrThrow<string>('SUPABASE_PUBLISHABLE_KEY');
+      const token = this.config.getOrThrow<string>('SUPABASE_ASSET_UPLOAD_TOKEN');
+      const { role, exp } = decodeJwt(token);
+      if (
+        !key.startsWith('sb_publishable_') || role !== 'gdg_asset_uploader'
+        || typeof exp !== 'number' || !Number.isFinite(exp) || exp <= Date.now() / 1000
+      ) {
+        throw new Error('Invalid asset storage credential');
+      }
+      const url = new URL(this.config.getOrThrow<string>('SUPABASE_URL'));
+      if (process.env.NODE_ENV === 'production' && url.protocol !== 'https:') {
+        throw new Error('Production asset storage requires HTTPS');
+      }
+      this.client = createClient(url.href, key, {
+        accessToken: async () => token,
+      });
+      return this.client;
     } catch {
       throw new BadGatewayException('Event image storage is unavailable.');
     }
-    return this.client;
-  }
-
-  private ensureBucket(client: SupabaseClient) {
-    this.bucketReady ??= (async () => {
-      const { data, error } = await client.storage.listBuckets();
-      if (error) {
-        this.logStorageError('list_buckets', error);
-        throw new BadGatewayException('Event image storage is unavailable.');
-      }
-      const existing = data.find((bucket) => bucket.name === BUCKET);
-      if (existing) {
-        if (!existing.public) {
-          const { error: updateError } = await client.storage.updateBucket(BUCKET, {
-            public: true,
-            fileSizeLimit: MAX_IMAGE_BYTES,
-            allowedMimeTypes: [...IMAGE_TYPES],
-          });
-          if (updateError) {
-            this.logStorageError('update_bucket', updateError);
-            throw new BadGatewayException('Event image storage is unavailable.');
-          }
-        }
-        return;
-      }
-      const { error: createError } = await client.storage.createBucket(BUCKET, {
-        public: true,
-        fileSizeLimit: MAX_IMAGE_BYTES,
-        allowedMimeTypes: [...IMAGE_TYPES],
-      });
-      if (createError && !/already exists/i.test(createError.message)) {
-        this.logStorageError('create_bucket', createError);
-        throw new BadGatewayException('Event image storage is unavailable.');
-      }
-    })().catch((error: unknown) => {
-      this.bucketReady = undefined;
-      throw error;
-    });
-    return this.bucketReady;
-  }
-
-  private logStorageError(operation: string, error: { message?: string; name?: string; statusCode?: string }) {
-    const message = (error.message ?? 'Unknown storage error')
-      .replace(/sb_(?:secret|publishable)_[\w-]+/g, '[redacted]')
-      .slice(0, 240);
-    this.logger.error({
-      event: 'event_image_storage_failed',
-      operation,
-      errorName: error.name ?? 'StorageError',
-      statusCode: error.statusCode,
-      message,
-    });
   }
 }

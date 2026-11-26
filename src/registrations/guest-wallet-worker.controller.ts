@@ -96,7 +96,7 @@ export class GuestWalletWorkerController {
   }
 
   @Get()
-  @Header('Cache-Control', 'no-store')
+  @Header('Cache-Control', 'private, no-store')
   async list(
     @Headers('authorization') authorization: string | undefined,
     @Query('after') cursor?: string,
@@ -127,7 +127,7 @@ export class GuestWalletWorkerController {
   }
 
   @Get(':id')
-  @Header('Cache-Control', 'no-store')
+  @Header('Cache-Control', 'private, no-store')
   async ticket(
     @Headers('authorization') authorization: string | undefined,
     @Param('id', ParseIntPipe) id: number,
@@ -159,7 +159,7 @@ export class GuestWalletWorkerController {
 
   @Post(':id/email/claim')
   @HttpCode(200)
-  @Header('Cache-Control', 'no-store')
+  @Header('Cache-Control', 'private, no-store')
   async claim(
     @Headers('authorization') authorization: string | undefined,
     @Param('id', ParseIntPipe) _id: number,
