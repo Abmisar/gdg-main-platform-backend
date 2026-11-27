@@ -1,0 +1,7 @@
+[Unit]
+Description=GDG PostgreSQL PITR alert
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 %h/.local/state/gdg/prod/current/pitr-ops.py alert
+UMask=0077

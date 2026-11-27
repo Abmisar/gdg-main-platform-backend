@@ -1,0 +1,3 @@
+FROM postgres:18-bookworm@sha256:e742a2668255221388004f3a42b6150a2103f5054ab3a4a93ae9e4f01e551c35
+RUN apt-get update && apt-get install -y --no-install-recommends pgbackrest && pgbackrest version && rm -rf /var/lib/apt/lists/*
+COPY pgbackrest.conf /etc/pgbackrest/pgbackrest.conf

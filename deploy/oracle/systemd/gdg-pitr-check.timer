@@ -1,0 +1,10 @@
+[Unit]
+Description=Check archived WAL and PostgreSQL base backup age
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=5min
+AccuracySec=10s
+
+[Install]
+WantedBy=timers.target
