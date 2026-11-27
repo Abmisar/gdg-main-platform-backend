@@ -1,3 +1,4 @@
+import type { ConsentEvidence } from '../data-rights/consent.js';
 import { Inject, Injectable } from '@nestjs/common';
 import { apiValidationError } from '../common/http/api-response.js';
 import {
@@ -155,6 +156,7 @@ export class EventRegistrationService {
     personId: number,
     discoverySource: EventDiscoverySource,
     answers: AnswerDto[],
+    evidence: ConsentEvidence,
   ) {
     const event = await this.prisma.event.findUnique({
       where: { eventId },
@@ -184,6 +186,7 @@ export class EventRegistrationService {
 
     try {
       return await this.prisma.$transaction(async (tx) => {
+        await tx.consentRecord.createMany({ data: evidence.map(row => ({ ...row, personId })) });
         const registration = await tx.eventRegistration.create({
           data: { eventId, personId, discoverySource },
           select: { registrationId: true, status: true, registeredAt: true },

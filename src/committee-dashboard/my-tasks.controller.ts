@@ -1,3 +1,4 @@
+import { AuditRead } from '../prisma/read-audit.js';
 import { Body, Controller, Get, Inject, Param, ParseIntPipe, Patch, UseGuards } from '@nestjs/common';
 import { AuthRequiredGuard, type AuthenticatedUser, CurrentUser } from '../auth/current-user.js';
 import { apiSuccess } from '../common/http/api-response.js';
@@ -15,6 +16,7 @@ export class MyTasksController {
   }
 
   @Get('committees/:committeeCode/members')
+  @AuditRead('members.directory', 'array')
   async committeeMembers(@CurrentUser() user: AuthenticatedUser, @Param('committeeCode') committeeCode: string) {
     return apiSuccess(await this.dashboard.getMyCommitteeDirectory(user, committeeCode));
   }

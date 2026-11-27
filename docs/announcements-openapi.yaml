@@ -222,7 +222,7 @@ components:
                 alt: { type: string }
         publishedAt: { type: string, format: date }
         updatedAt: { type: string, format: date }
-        publishedBy: { type: string }
+        publishedBy: { type: [string, 'null'] }
         pinned: { type: boolean }
         body:
           type: array

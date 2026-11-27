@@ -56,6 +56,13 @@
     "is_sensitive": true
   },
   {
+    "code": "audit.staff_reads.view",
+    "description": "Read the staff access history",
+    "scope": "global",
+    "grant_permission": null,
+    "is_sensitive": true
+  },
+  {
     "code": "audit.view",
     "description": "View the audit log",
     "scope": "global",

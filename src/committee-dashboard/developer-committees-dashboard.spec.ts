@@ -72,6 +72,7 @@ describe('Club Leadership dashboard', () => {
 
   it('returns the organization overview with committee details for filtering', async () => {
     const clubService = new CommitteeDashboardService({
+      $queryRaw: vi.fn().mockResolvedValue([{members:1,points:0,month:0}]),
       person: { findUnique: vi.fn().mockResolvedValue({ fullName: 'Abdullah' }) },
       globalPointEntry: { groupBy: vi.fn().mockResolvedValue([]), findMany: vi.fn().mockResolvedValue([]) },
       member: { findMany: vi.fn().mockResolvedValue([{
@@ -99,11 +100,10 @@ describe('Club Leadership dashboard', () => {
           recipient: { member: { person: { fullName: 'Abdullah' } }, committee: { committeeCode: 'DATA', committeeName: 'Data' } },
         }]),
         groupBy: vi.fn()
-          .mockResolvedValueOnce([{ memberId: 12, _sum: { pointsDelta: 8 } }])
           .mockResolvedValueOnce([{ memberId: 12, committeeId: 1, _sum: { pointsDelta: 8 } }]),
         aggregate: vi.fn().mockResolvedValue({ _sum: { pointsDelta: 0 } }),
       },
-      event: { findMany: vi.fn().mockResolvedValue([]) },
+      event: { findMany: vi.fn().mockResolvedValue([]), count: vi.fn().mockResolvedValue(0) },
       eventRegistration: { groupBy: vi.fn().mockResolvedValue([]) },
     } as unknown as PrismaService, { hasGlobalPermission } as unknown as CommitteeAccessService);
     hasGlobalPermission.mockResolvedValue(true);

@@ -32,7 +32,7 @@ beforeAll(async () => {
   await app.init();
 });
 
-afterAll(async () => app.close());
+afterAll(async () => { vi.unstubAllEnvs(); await app.close(); });
 
 beforeEach(() => {
   actor = undefined;
@@ -98,13 +98,17 @@ describe('membership request access', () => {
   it('allows a verified applicant to submit their own request', async () => {
     actor = { personId: 12, memberId: null };
     create.mockResolvedValue({ id: 4, status: 'PENDING' });
-    const body = { applicationData: {}, committees: [] };
+    vi.stubEnv('BETTER_AUTH_SECRET', 'synthetic-membership-consent-key');
+    const body = { consent: { privacy: '2', terms: '2', locale: 'en' }, applicationData: {}, committees: [] };
 
     await request(app.getHttpServer())
       .post('/membership-requests')
       .set('Authorization', 'Bearer verified-by-auth-guard')
       .send(body)
       .expect(201);
-    expect(create).toHaveBeenCalledWith(actor, body);
+    expect(create).toHaveBeenCalledWith(actor, body, [
+      expect.objectContaining({ purpose: 'membership', document: 'privacy' }),
+      expect.objectContaining({ purpose: 'membership', document: 'terms' }),
+    ]);
   });
 });

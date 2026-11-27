@@ -1,17 +1,29 @@
+import { plainToInstance } from 'class-transformer';
+import { validateSync } from 'class-validator';
 import { BadRequestException } from '@nestjs/common';
 import { signUpEmail } from 'better-auth/api';
 import type { PrismaService } from '../prisma/prisma.service.js';
 import { AuthService } from './auth.service.js';
 import type { BetterAuthService } from './better-auth.service.js';
-import type { SignupDto } from './signup.dto.js';
+import { SignupDto } from './signup.dto.js';
 
 const input: SignupDto = {
+  ageConfirmed: true,
+  consent: { privacy: '2', terms: '2', locale: 'en' },
   email: 'applicant@example.test', fullName: 'Sample Applicant', password: 'test-password',
   registrationType: 'NON_MEMBER', applicationData: {
     phoneNumber: '0500000000', university: 'University of Jeddah', college: 'Computing',
-    major: 'CS', level: '1', gender: 'female',
+    major: 'CS', branch: 'Main', skillsByCommittee: { GENERAL: ['Planning'] }, level: '1', gender: 'female',
   },
 };
+
+it('requires gender, branch and meaningful skills while allowing a single email', () => {
+  expect(validateSync(plainToInstance(SignupDto, input))).toHaveLength(0);
+  for (const changes of [{ gender: null }, { branch: ' ' }, { skillsByCommittee: {} }, { skillsByCommittee: { GENERAL: [' '] } }]) {
+    const dto = plainToInstance(SignupDto, { ...input, applicationData: { ...input.applicationData, ...changes } });
+    expect(validateSync(dto).map(error => error.property)).toContain('applicationData');
+  }
+});
 
 function fixture() {
   const tx = {
@@ -37,7 +49,7 @@ describe('signup staging', () => {
     if (state === 'person') tx.person.findFirst.mockResolvedValue({ personId: 1 });
     if (state === 'staged application') tx.signupVerification.findUnique.mockResolvedValue({ signupVerificationId: 1 });
     if (state === 'reserved identity') tx.authUser.createMany.mockResolvedValue({ count: 0 });
-    await expect(service.signup(input)).resolves.toEqual({ emailVerificationRequired: true });
+    await expect(service.signup(input, [])).resolves.toEqual({ emailVerificationRequired: true });
     expect(hash).toHaveBeenCalledWith(input.password);
     expect(tx.authAccount.create).not.toHaveBeenCalled();
     expect(tx.signupVerification.create).not.toHaveBeenCalled();
@@ -47,7 +59,7 @@ describe('signup staging', () => {
   it('honors the auth provider input and password limits before staging', async () => {
     const { db, service, hash } = fixture();
     for (const invalid of [{ email: 'bad-address' }, { password: '🐢'.repeat(70) }]) {
-      await expect(service.signup({ ...input, ...invalid })).rejects.toBeInstanceOf(BadRequestException);
+      await expect(service.signup({ ...input, ...invalid }, [])).rejects.toBeInstanceOf(BadRequestException);
     }
     expect(hash).not.toHaveBeenCalled();
     expect(db.$transaction).not.toHaveBeenCalled();
@@ -56,7 +68,17 @@ describe('signup staging', () => {
   it('requests verification only after successful staging', async () => {
     const { tx, service, sendVerificationEmail } = fixture();
     tx.signupVerification.create.mockRejectedValue(new Error('staging unavailable'));
-    await expect(service.signup(input)).rejects.toThrow('staging unavailable');
+    await expect(service.signup(input, [])).rejects.toThrow('staging unavailable');
     expect(sendVerificationEmail).not.toHaveBeenCalled();
   });
+});
+
+it('stores the current pair when an existing Google profile accepts again', async () => {
+  const consentRecord = { createMany: vi.fn() };
+  const prisma = { consentRecord, person: { findUnique: vi.fn().mockResolvedValue({ personId: 7, pendingSignup: null }) } };
+  const service = new AuthService(prisma as unknown as PrismaService, {} as BetterAuthService);
+  const evidence = ['terms', 'privacy'].map(document => ({ document, purpose: 'signup', locale: 'ar', version: '2' as const,
+    acceptedAt: new Date().toISOString(), ipHash: 'a'.repeat(64), userAgentHash: 'b'.repeat(64) }));
+  await service.completeGoogleSignup({ id: 'synthetic-id', email: input.email, emailVerified: true }, input, evidence);
+  expect(consentRecord.createMany).toHaveBeenCalledWith({ data: evidence.map(row => ({ ...row, purpose: 'renewal', personId: 7 })) });
 });

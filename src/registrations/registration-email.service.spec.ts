@@ -11,7 +11,6 @@ describe('registration email rendering', () => {
   const registration = {
     registrationId: 42,
     to: 'attendee@example.test',
-    recipientName: 'Attendee',
     eventName: 'Afaq',
     eventType: 'Workshop',
   };

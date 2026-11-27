@@ -7,6 +7,7 @@ import { AuthService } from './auth.service.js';
 
 export interface RequestUser {
   personId: number;
+  sessionId?: string;
   // null if they aren't an active member
   memberId: number | null;
   email?: string;
@@ -34,7 +35,7 @@ export class AuthGuard implements CanActivate {
       select: { personId: true, isActive: true, member: { select: { memberId: true, isActive: true } } },
     });
     if (!person?.isActive) return true;
-    request.user = { personId: person.personId, memberId: person.member?.isActive ? person.member.memberId : null, email: session.user.email, fromEmailLink: false };
+    request.user = { personId: person.personId, sessionId: session.session?.id, memberId: person.member?.isActive ? person.member.memberId : null, email: session.user.email, fromEmailLink: false };
     return true;
   }
 }

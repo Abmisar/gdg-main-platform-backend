@@ -3,7 +3,7 @@ import { betterAuth } from 'better-auth';
 import { APIError, createAuthMiddleware, getOAuthState } from 'better-auth/api';
 import { openAPI } from 'better-auth/plugins';
 import { prismaAdapter } from 'better-auth/adapters/prisma';
-import { randomUUID } from 'node:crypto';
+import { createHmac, randomUUID } from 'node:crypto';
 import type { PrismaService } from '../prisma/prisma.service.js';
 import type { ResendAuthEmailService } from './email/resend-auth-email.service.js';
 import { hashAuthPassword, verifyAuthPassword } from './password.js';
@@ -23,9 +23,9 @@ export function createBetterAuth(prisma: PrismaService, email: ResendAuthEmailSe
     const claimed = await prisma.authUser.updateMany({ where: { id: user.id, emailVerified: true, welcomeSentAt: null }, data: { welcomeSentAt: claimedAt } });
     if (!claimed.count) return;
     try {
-      const current = await prisma.authUser.findUniqueOrThrow({ where: { id: user.id } });
+      const current = await prisma.authUser.findUniqueOrThrow({ where: { id: user.id }, select: { email: true, locale: true } });
       const locale = current.locale === 'ar' ? 'ar' : 'en';
-      await email.send({ to: current.email, kind: 'welcome', locale, url: `${origin}/${locale}/login`, idempotencyKey: `auth-welcome-${user.id}` });
+      await email.send({ to: current.email, kind: 'welcome', locale, url: `${origin}/${locale}/login`, idempotencyKey: `auth-welcome-${createHmac('sha256', secret).update(user.id).digest('hex')}` });
     } catch (error) {
       await prisma.authUser.updateMany({ where: { id: user.id, welcomeSentAt: claimedAt }, data: { welcomeSentAt: null } });
       throw error;
@@ -64,6 +64,12 @@ export function createBetterAuth(prisma: PrismaService, email: ResendAuthEmailSe
       if (ctx.context.newSession?.user) await sendWelcomeOnce(ctx.context.newSession.user);
     }) },
     databaseHooks: {
+      session: { create: { after: async (session) => {
+        await prisma.authUser.updateMany({
+          where: { id: session.userId, OR: [{ lastSignInAt: null }, { lastSignInAt: { lt: session.createdAt } }] },
+          data: { lastSignInAt: session.createdAt },
+        });
+      } } },
       user: { create: { before: async (user) => {
         const state = await getOAuthState();
         // Locale is presentation-only client input, carried through validated OAuth state.

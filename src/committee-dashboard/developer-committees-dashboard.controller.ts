@@ -1,3 +1,4 @@
+import { AuditRead } from '../prisma/read-audit.js';
 import { Body, Controller, Delete, Get, Inject, Param, ParseIntPipe, Patch, Post, Req } from '@nestjs/common';
 import { apiSuccess } from '../common/http/api-response.js';
 import type { RequestUser } from '../auth/auth.guard.js';
@@ -11,11 +12,13 @@ export class DeveloperCommitteesDashboardController {
   constructor(@Inject(CommitteeDashboardService) private readonly dashboard: CommitteeDashboardService, @Inject(LeadershipTasksService) private readonly tasks: LeadershipTasksService) {}
 
   @Get('dashboard')
+  @AuditRead('members.developer-leaders', 'leaders')
   async overview(@Req() request: { user?: RequestUser }) {
     return apiSuccess(await this.dashboard.getDeveloperOverview(request.user));
   }
 
   @Get('tasks')
+  @AuditRead('members.developer-assignees', 'targets')
   async getTasks(@Req() request: { user?: RequestUser }) {
     return apiSuccess(await this.tasks.getDeveloperTasks(request.user));
   }

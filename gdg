@@ -17,20 +17,43 @@ compose() {
   docker compose -f docker-compose.yml -f compose.platform.yml "$@"
 }
 
-setup_env() {
-  if [ -f .env ]; then
-    return
-  fi
+setup_env() (
   umask 077
-  db_password=$(od -An -N24 -tx1 /dev/urandom | tr -d ' \n')
-  admin_password=$(od -An -N24 -tx1 /dev/urandom | tr -d ' \n')
-  (set -C; sed \
-    -e "s/^POSTGRES_PASSWORD=CHANGE_ME$/POSTGRES_PASSWORD=$db_password/" \
-    -e "s/:CHANGE_ME@/:$db_password@/" \
-    -e "s/^PGADMIN_DEFAULT_PASSWORD=CHANGE_ME$/PGADMIN_DEFAULT_PASSWORD=$admin_password/" \
-    .env.example > .env)
-  printf '%s\n' 'Created private .env with local credentials. Existing database credentials are never reset.'
-}
+  settings_tmp=$(mktemp .gdg-settings.XXXXXX)
+  trap 'rm -f "$settings_tmp"' EXIT
+  if [ -f .env ]; then
+    settings_source=.env
+  else
+    settings_source=.env.example
+  fi
+  dev_bootstrap_password=$(openssl rand -hex 24)
+  dev_admin_password=$(openssl rand -hex 24)
+  dev_auth_secret=$(openssl rand -hex 32)
+  dev_app_password=$(openssl rand -hex 24)
+  dev_reader_password=$(openssl rand -hex 24)
+  export dev_bootstrap_password dev_admin_password dev_auth_secret dev_app_password dev_reader_password
+  awk -v fresh="$settings_source" '
+    fresh == ".env.example" && /^POSTGRES_PASSWORD=CHANGE_ME$/ { $0="POSTGRES_PASSWORD=" ENVIRON["dev_bootstrap_password"] }
+    fresh == ".env.example" && /^PGADMIN_DEFAULT_PASSWORD=CHANGE_ME$/ { $0="PGADMIN_DEFAULT_PASSWORD=" ENVIRON["dev_admin_password"] }
+    /^BETTER_AUTH_SECRET=CHANGE_ME_TO_A_RANDOM_SECRET_OF_AT_LEAST_32_CHARACTERS$/ { $0="BETTER_AUTH_SECRET=" ENVIRON["dev_auth_secret"] }
+    /^GDG_APP_PASSWORD=GENERATE$/ { $0="GDG_APP_PASSWORD=" ENVIRON["dev_app_password"] }
+    /^GDG_AUDIT_READER_PASSWORD=GENERATE$/ { $0="GDG_AUDIT_READER_PASSWORD=" ENVIRON["dev_reader_password"] }
+    /^DATABASE_URL=/ { sub(/:APP_PASSWORD@/, ":" ENVIRON["dev_app_password"] "@") }
+    /^AUDIT_READER_DATABASE_URL=/ { sub(/:READER_PASSWORD@/, ":" ENVIRON["dev_reader_password"] "@") }
+    { print }
+  ' "$settings_source" > "$settings_tmp"
+  for var in FIELD_ENCRYPTION_KEYS FIELD_ENCRYPTION_ACTIVE_VERSION FIELD_BLIND_INDEX_KEY GDG_APP_PASSWORD GDG_MIGRATION_PASSWORD GDG_AUDIT_READER_PASSWORD; do
+    if grep -q "^$var=" "$settings_tmp"; then continue; fi
+    case "$var" in
+      FIELD_ENCRYPTION_KEYS) value=$(printf "'{\"dev1\":\"%s\"}'" "$(openssl rand -base64 32)") ;;
+      FIELD_ENCRYPTION_ACTIVE_VERSION) value=dev1 ;;
+      FIELD_BLIND_INDEX_KEY) value=$(openssl rand -base64 32) ;;
+      *) value=$(openssl rand -hex 24) ;;
+    esac
+    printf '\n%s=%s\n' "$var" "$value" >> "$settings_tmp"
+  done
+  mv "$settings_tmp" .env
+)
 
 scope=all
 case "${1:-help}" in
@@ -99,6 +122,7 @@ case "$action" in
     if [ "$scope" = frontend ]; then
       compose up -d --build --renew-anon-volumes --wait --wait-timeout 300 --no-deps frontend
     else
+      compose stop backend
       compose up -d --build --renew-anon-volumes --wait --wait-timeout 300 $services
     fi
     if [ "$scope" != backend ]; then

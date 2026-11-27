@@ -1,3 +1,4 @@
+import { captureConsent } from '../data-rights/consent.js';
 import { Body, Controller, Get, HttpCode, Inject, Patch, Post, Req, UnauthorizedException } from '@nestjs/common';
 import type { Request } from 'express';
 import { apiSuccess } from '../common/http/api-response.js';
@@ -23,7 +24,7 @@ export class AuthController {
 
   @Post('account/signup')
   @AuthRateLimit({ scope: 'signup', dimension: 'ip', limit: 20, windowSeconds: 3600 }, { scope: 'signup', dimension: 'email', limit: 5, windowSeconds: 86400 })
-  async signup(@Body() body: SignupDto) { return apiSuccess(await this.auth.signup(body)); }
+  async signup(@Req() request: Request, @Body() body: SignupDto) { return apiSuccess(await this.auth.signup(body, captureConsent(body.consent, request, body.registrationType === 'MEMBER' ? ['signup', 'membership'] : ['signup'], body.ageConfirmed))); }
 
   @Post('account/request-password-reset')
   @HttpCode(200)
@@ -48,7 +49,7 @@ export class AuthController {
   async completeGoogleSignup(@Req() request: Request, @Body() body: GoogleSignupCompletionDto) {
     const session = await this.better.session(request.headers);
     if (!session?.user.emailVerified) throw new UnauthorizedException();
-    return apiSuccess(await this.auth.completeGoogleSignup(session.user, body));
+    return apiSuccess(await this.auth.completeGoogleSignup(session.user, body, captureConsent(body.consent, request, body.registrationType === 'MEMBER' ? ['signup', 'membership'] : ['signup'], body.ageConfirmed)));
   }
 
   @Get('me')

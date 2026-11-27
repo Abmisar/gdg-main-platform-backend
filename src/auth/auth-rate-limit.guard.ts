@@ -15,7 +15,7 @@ import { ConfigService } from '@nestjs/config';
 import { SetMetadata } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service.js';
 
-type RateLimitDimension = 'ip' | 'email' | 'refreshToken' | 'verificationToken';
+type RateLimitDimension = 'person' | 'ip' | 'email' | 'refreshToken' | 'verificationToken';
 
 export type AuthRateLimitRule = {
   scope: string;
@@ -31,6 +31,7 @@ export function AuthRateLimit(...rules: AuthRateLimitRule[]): MethodDecorator {
 }
 
 interface RateLimitRequest {
+  user?: { personId: number };
   ip?: string;
   socket?: { remoteAddress?: string };
   body?: Record<string, unknown>;
@@ -48,6 +49,10 @@ export class AuthRateLimitGuard implements CanActivate {
   ) {}
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
+    return this.check(context, false);
+  }
+
+  protected async check(context: ExecutionContext, personOnly: boolean): Promise<boolean> {
     const rules = this.reflector.get<AuthRateLimitRule[]>(
       AUTH_RATE_LIMIT_METADATA,
       context.getHandler(),
@@ -57,6 +62,7 @@ export class AuthRateLimitGuard implements CanActivate {
     const request = context.switchToHttp().getRequest<RateLimitRequest>();
     const secret = this.config.getOrThrow<string>('BETTER_AUTH_SECRET');
     for (const rule of rules) {
+      if ((rule.dimension === 'person') !== personOnly) continue;
       const value = this.dimensionValue(request, rule.dimension);
       if (!value) continue;
 
@@ -119,6 +125,7 @@ export class AuthRateLimitGuard implements CanActivate {
     request: RateLimitRequest,
     dimension: RateLimitDimension,
   ): string | undefined {
+    if (dimension === 'person') return request.user?.personId.toString();
     if (dimension === 'ip') {
       return clientIp(request);
     }
@@ -135,5 +142,12 @@ export class AuthRateLimitGuard implements CanActivate {
   private cookieValue(cookie: string | undefined, name: string): string | undefined {
     const pair = cookie?.split(';').map((item) => item.trim()).find((item) => item.startsWith(`${name}=`));
     return pair ? decodeURIComponent(pair.slice(name.length + 1)) : undefined;
+  }
+}
+
+@Injectable()
+export class PersonRateLimitGuard extends AuthRateLimitGuard {
+  override canActivate(context: ExecutionContext): Promise<boolean> {
+    return this.check(context, true);
   }
 }

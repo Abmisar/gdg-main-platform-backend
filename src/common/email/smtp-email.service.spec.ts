@@ -32,6 +32,10 @@ describe('SMTP submission and membership delivery', () => {
     const mail = new MembershipRequestEmailService(smtp(465));
     const email = { to: 'person@example.test', recipientName: 'Sample Person', decision: 'APPROVED', committeeName: 'Sample Committee' } as const;
     await mail.sendDecisionEmail(email);
+    const [payload] = relay.sendMail.mock.lastCall!;
+    expect(payload.text).toContain('Hello,');
+    expect(payload.html).toContain('مرحبًا،');
+    expect(JSON.stringify(payload)).not.toContain('Sample Person');
     await mail.sendDecisionEmail({ ...email, to: null });
     const deliveryId = expect.stringMatching(/^[0-9a-f-]{36}$/);
     expect(log).toHaveBeenCalledWith({ event: 'membership_decision_email_sent', deliveryId });

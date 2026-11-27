@@ -182,7 +182,7 @@ export class AnnouncementsService {
     pinned: boolean;
     publishedAt: Date;
     updatedAt: Date;
-    publisher: { person: { fullName: string } };
+    publisher: { person: { fullName: string } } | null;
   }) {
     const body = row.body?.split(/\n\s*\n/).map((text) => text.trim()).filter(Boolean);
     return {
@@ -197,7 +197,7 @@ export class AnnouncementsService {
         : { type: 'artwork' as const, artwork: artworkByCategory[row.category] },
       publishedAt: row.publishedAt.toISOString().slice(0, 10),
       updatedAt: row.updatedAt.toISOString().slice(0, 10),
-      publishedBy: row.publisher.person.fullName,
+      publishedBy: row.publisher?.person.fullName ?? null,
       pinned: row.pinned,
       ...(row.status === 'DRAFT' ? {
         draftActionLabel: row.actionLabel,

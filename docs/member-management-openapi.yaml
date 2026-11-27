@@ -6,6 +6,47 @@ info:
 servers:
   - url: /
 paths:
+  /club-leadership/dashboard:
+    get:
+      operationId: clubLeadershipDashboard
+      summary: Return club totals and a bounded page of members and events
+      security: [{ bearerAuth: [] }, { accessCookie: [] }]
+      parameters:
+        - { in: query, name: afterMemberId, schema: { type: integer, default: 0 } }
+        - { in: query, name: afterEventId, schema: { type: integer, default: 0 } }
+      responses:
+        '200': { description: Club totals and up to 100 members and 100 events. Use nextMemberCursor and nextEventCursor for the following pages. Each cursor is null at the end. }
+        '403': { description: Club leadership permission required. }
+  /club-leadership/read-audit:
+    get:
+      operationId: listStaffReads
+      summary: Return the latest 200 staff reads in descending ID order
+      security: [{ bearerAuth: [] }, { accessCookie: [] }]
+      responses:
+        '200':
+          description: Access history
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: { const: true }
+                  message: { type: string }
+                  error: { type: 'null' }
+                  data:
+                    type: array
+                    items:
+                      type: object
+                      required: [id, actorMemberId, action, status, scope, count, readAt]
+                      properties:
+                        id: { type: integer }
+                        actorMemberId: { type: integer }
+                        action: { type: string }
+                        status: { type: string, enum: [DISCLOSED, FAILED] }
+                        scope: { type: [string, 'null'] }
+                        count: { type: integer }
+                        readAt: { type: string, format: date-time }
+        '403': { description: Active club leadership permission required. }
   /my/committees/{committeeCode}/members:
     get:
       operationId: listMyCommitteeMembers

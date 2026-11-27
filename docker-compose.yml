@@ -38,13 +38,51 @@ services:
       retries: 12
       start_period: 30s
 
+  provision:
+    image: postgres:17
+    depends_on:
+      db: { condition: service_healthy }
+    environment: &admin_environment
+      PGHOST: db
+      PGDATABASE: ${POSTGRES_DB}
+      PGUSER: ${POSTGRES_USER}
+      PGPASSWORD: ${POSTGRES_PASSWORD}
+      GDG_MIGRATION_PASSWORD: ${GDG_MIGRATION_PASSWORD:?Run ./gdg backend run}
+      GDG_APP_PASSWORD: ${GDG_APP_PASSWORD:?Run ./gdg backend run}
+      GDG_AUDIT_READER_PASSWORD: ${GDG_AUDIT_READER_PASSWORD:?Run ./gdg backend run}
+    volumes:
+      - ./docs/sql/field-access.sql:/roles.sql:ro
+      - ./scripts/dev-role-passwords.sql:/passwords.sql:ro
+    command: ["psql", "-X", "-v", "ON_ERROR_STOP=1", "-f", "/roles.sql", "-f", "/passwords.sql"]
+
+  migrate:
+    build: { context: ., target: builder }
+    depends_on:
+      provision: { condition: service_completed_successfully }
+    environment:
+      DATABASE_URL: postgresql://gdg_migrate:${GDG_MIGRATION_PASSWORD}@db:5432/${POSTGRES_DB}
+      FIELD_ENCRYPTION_KEYS: ${FIELD_ENCRYPTION_KEYS:?Run ./gdg backend run}
+      FIELD_ENCRYPTION_ACTIVE_VERSION: ${FIELD_ENCRYPTION_ACTIVE_VERSION:?Run ./gdg backend run}
+      FIELD_BLIND_INDEX_KEY: ${FIELD_BLIND_INDEX_KEY:?Run ./gdg backend run}
+    command: ["sh", "-ec", "pnpm prisma:migrate:deploy && node scripts/dev-field-rollout.mjs"]
+
+  grants:
+    image: postgres:17
+    depends_on:
+      migrate: { condition: service_completed_successfully }
+    environment: *admin_environment
+    volumes:
+      - ./docs/sql/field-access.sql:/roles.sql:ro
+    command: ["psql", "-X", "-v", "ON_ERROR_STOP=1", "-f", "/roles.sql"]
+
   backend:
     build:
       context: .
-    command: ["sh", "-c", "pnpm prisma:migrate:deploy && exec pnpm start:dev"]
+      target: builder
+    command: ["sh", "-c", "exec pnpm start:dev"]
     depends_on:
-      db:
-        condition: service_healthy
+      grants:
+        condition: service_completed_successfully
     environment:
       PORT: 3001
       NODE_ENV: development
@@ -55,12 +93,16 @@ services:
       GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
       RESEND_API_KEY: ${RESEND_API_KEY:-}
       EMAIL_FROM: ${EMAIL_FROM:-GDG on Campus UJ <noreply@gdguj.org>}
-      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}?schema=public
+      DATABASE_URL: postgresql://gdg_app:${GDG_APP_PASSWORD}@db:5432/${POSTGRES_DB}?schema=public
+      AUDIT_READER_DATABASE_URL: postgresql://gdg_audit_reader:${GDG_AUDIT_READER_PASSWORD}@db:5432/${POSTGRES_DB}
+      FIELD_ENCRYPTION_KEYS: ${FIELD_ENCRYPTION_KEYS}
+      FIELD_ENCRYPTION_ACTIVE_VERSION: ${FIELD_ENCRYPTION_ACTIVE_VERSION}
+      FIELD_BLIND_INDEX_KEY: ${FIELD_BLIND_INDEX_KEY}
     ports:
       - "3001:3001"
     volumes:
-      - .:/app
-      - /app/node_modules
+      - ./src:/app/src
+      - /app/src/generated
 
 volumes:
   postgres_data:

@@ -1,0 +1,789 @@
+openapi: 3.1.0
+info:
+  title: GDG data rights and consent
+  version: 1.0.0
+security:
+- session: []
+paths:
+  "/consent/documents":
+    get:
+      summary: Current document versions
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    const: true
+                  message:
+                    type: string
+                  data:
+                    "$ref": "#/components/schemas/DocumentVersions"
+                  error:
+                    type: 'null'
+                required:
+                - success
+                - message
+                - data
+                - error
+                additionalProperties: false
+        default:
+          description: GDG error envelope
+      security: []
+  /me/privacy-identity:
+    get:
+      summary: Resolve the authenticated person and session for binding the privacy UI
+      responses:
+        '200':
+          description: Current privacy identity
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [success, message, data, error]
+                properties:
+                  success: { const: true }
+                  message: { type: string }
+                  error: { type: 'null' }
+                  data:
+                    type: object
+                    required: [personId, sessionId]
+                    properties:
+                      personId: { type: integer }
+                      sessionId: { type: string }
+        '401': { description: Session required }
+  /me/consent:
+    get:
+      parameters: [{ $ref: "#/components/parameters/ExpectedPerson" }]
+      summary: Check outstanding document versions after sign-in
+      responses:
+        '412': { description: The authenticated person differs from the expected person }
+        '200':
+          description: Current consent status
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ConsentStatusResponse' }
+        '401': { description: Session required }
+    post:
+      parameters: [{ $ref: "#/components/parameters/ExpectedPerson" }]
+      summary: Record acceptance of both current documents
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [consent]
+              properties:
+                consent: { $ref: '#/components/schemas/Consent' }
+      responses:
+        '412': { description: The authenticated person differs from the expected person }
+        '201':
+          description: Updated consent status
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ConsentStatusResponse' }
+        '400': { description: Invalid or outdated consent }
+        '401': { description: Session required }
+        '429': { description: Too many submissions }
+  "/me/export":
+    get:
+      parameters: [{ $ref: "#/components/parameters/ExpectedPerson" }]
+      summary: Export current subject data. Five requests per IP per hour.
+      responses:
+        '412': { description: The authenticated person differs from the expected person }
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    const: true
+                  message:
+                    type: string
+                  data:
+                    "$ref": "#/components/schemas/Export"
+                  error:
+                    type: 'null'
+                required:
+                - success
+                - message
+                - data
+                - error
+                additionalProperties: false
+        default:
+          description: GDG error envelope
+  "/me/profile":
+    patch:
+      parameters: [{ $ref: "#/components/parameters/ExpectedPerson" }]
+      summary: Correct editable profile fields
+      responses:
+        '412': { description: The authenticated person differs from the expected person }
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    const: true
+                  message:
+                    type: string
+                  data:
+                    "$ref": "#/components/schemas/CorrectedProfile"
+                  error:
+                    type: 'null'
+                required:
+                - success
+                - message
+                - data
+                - error
+                additionalProperties: false
+        default:
+          description: GDG error envelope
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              "$ref": "#/components/schemas/Correction"
+  /me/data-requests:
+    get:
+      parameters: [{ $ref: "#/components/parameters/ExpectedPerson" }]
+      summary: List requests owned by the signed-in profile, newest first
+      responses:
+        '412': { description: The authenticated person differs from the expected person }
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [success, message, data, error]
+                properties:
+                  success: { const: true }
+                  message: { type: string }
+                  error: { type: 'null' }
+                  data: { type: array, items: { $ref: '#/components/schemas/SubjectRequest' } }
+        '429': { description: Per-person or per-IP request limit reached }
+        '401': { description: Session required }
+    post:
+      parameters: [{ $ref: "#/components/parameters/ExpectedPerson" }]
+      summary: Submit a privacy request for the signed-in profile
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [kind]
+              properties:
+                kind: { enum: [objection, complaint, other] }
+                details: { type: string, maxLength: 2000, pattern: '\S' }
+      responses:
+        '412': { description: The authenticated person differs from the expected person }
+        '201':
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [success, message, data, error]
+                properties:
+                  success: { const: true }
+                  message: { type: string }
+                  error: { type: 'null' }
+                  data: { $ref: '#/components/schemas/SubjectRequest' }
+        '429': { description: Per-person or per-IP request limit reached }
+        '401': { description: Session required }
+        '400': { description: Invalid submission }
+  "/me/deletion":
+    get:
+      parameters: [{ $ref: "#/components/parameters/ExpectedPerson" }]
+      summary: Read the scheduled deadline, or null if none is scheduled
+      responses:
+        '412': { description: The authenticated person differs from the expected person }
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [success, message, data, error]
+                properties:
+                  success: { const: true }
+                  message: { type: string }
+                  error: { type: 'null' }
+                  data: { oneOf: [{ $ref: '#/components/schemas/Deletion' }, { type: 'null' }] }
+        '429': { description: Per-person or per-IP request limit reached }
+        '401': { description: Session required }
+    post:
+      parameters: [{ $ref: "#/components/parameters/ExpectedPerson" }]
+      summary: Schedule account deletion after 14 days
+      responses:
+        '412': { description: The authenticated person differs from the expected person }
+        '201':
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    const: true
+                  message:
+                    type: string
+                  data:
+                    "$ref": "#/components/schemas/Deletion"
+                  error:
+                    type: 'null'
+                required:
+                - success
+                - message
+                - data
+                - error
+                additionalProperties: false
+        default:
+          description: GDG error envelope
+    delete:
+      parameters: [{ $ref: "#/components/parameters/ExpectedPerson" }]
+      summary: Cancel during the 14-day grace period
+      responses:
+        '412': { description: The authenticated person differs from the expected person }
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    const: true
+                  message:
+                    type: string
+                  data:
+                    type: 'null'
+                  error:
+                    type: 'null'
+                required:
+                - success
+                - message
+                - data
+                - error
+                additionalProperties: false
+        default:
+          description: GDG error envelope
+  "/leadership/data-requests":
+    post:
+      summary: Log a request and assign the acting group leader as handler
+      responses:
+        '201':
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    const: true
+                  message:
+                    type: string
+                  data:
+                    "$ref": "#/components/schemas/ManualRequest"
+                  error:
+                    type: 'null'
+                required:
+                - success
+                - message
+                - data
+                - error
+                additionalProperties: false
+        '409': { description: Shared verified address requires an explicit personId }
+        '400': { description: Invalid input or address unverified for selected person }
+        default:
+          description: GDG error envelope
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              "$ref": "#/components/schemas/ManualInput"
+    get:
+      summary: List manual rights requests in due-date order
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    const: true
+                  message:
+                    type: string
+                  data:
+                    type: array
+                    items:
+                      "$ref": "#/components/schemas/ManualRequest"
+                  error:
+                    type: 'null'
+                required:
+                - success
+                - message
+                - data
+                - error
+                additionalProperties: false
+        default:
+          description: GDG error envelope
+  "/leadership/data-requests/{id}":
+    patch:
+      summary: Update status and assign acting leader. Resolution required to close.
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    const: true
+                  message:
+                    type: string
+                  data:
+                    type: 'null'
+                  error:
+                    type: 'null'
+                required:
+                - success
+                - message
+                - data
+                - error
+                additionalProperties: false
+        default:
+          description: GDG error envelope
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              "$ref": "#/components/schemas/ManualUpdate"
+  "/account/signup":
+    "$ref": "./better-auth-openapi.yaml#/paths/~1account~1signup"
+  "/account/complete-profile":
+    "$ref": "./better-auth-openapi.yaml#/paths/~1account~1complete-profile"
+  "/membership-requests":
+    post:
+      summary: Submit membership application with current consent
+      responses:
+        '201':
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    const: true
+                  message:
+                    type: string
+                  data:
+                    type: object
+                  error:
+                    type: 'null'
+                required:
+                - success
+                - message
+                - data
+                - error
+                additionalProperties: false
+        default:
+          description: GDG error envelope
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                consent:
+                  "$ref": "#/components/schemas/Consent"
+                applicationData:
+                  "$ref": "./better-auth-openapi.yaml#/paths/~1account~1signup/post/requestBody/content/application~1json/schema/properties/applicationData"
+                committees:
+                  type: array
+                  minItems: 1
+                  items:
+                    type: object
+                    properties:
+                      committeeCode:
+                        type: string
+                      requestedRole:
+                        enum:
+                        - Member
+                        - Leader
+                        - Co-Leader
+                    required:
+                    - committeeCode
+                    - requestedRole
+                    additionalProperties: false
+              required:
+              - consent
+              - applicationData
+              - committees
+              additionalProperties: false
+  "/events/{eventId}/registrations":
+    post:
+      summary: Submit event application with current consent
+      responses:
+        '201':
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    const: true
+                  message:
+                    type: string
+                  data:
+                    type: object
+                  error:
+                    type: 'null'
+                required:
+                - success
+                - message
+                - data
+                - error
+                additionalProperties: false
+        default:
+          description: GDG error envelope
+      parameters:
+      - name: eventId
+        in: path
+        required: true
+        schema:
+          type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                consent:
+                  "$ref": "#/components/schemas/Consent"
+                discoverySource:
+                  enum:
+                  - WHATSAPP
+                  - X
+                  - LINKEDIN
+                  - ME_QR
+                  - LUMA_FEED
+                  - GOOGLE
+                  - INSTAGRAM
+                  - TECH
+                answers:
+                  type: array
+                  maxItems: 100
+                  items:
+                    type: object
+                    properties:
+                      questionId:
+                        type: integer
+                        minimum: 1
+                      answer:
+                        oneOf:
+                        - type: string
+                        - type: array
+                          items:
+                            type: string
+                    required:
+                    - questionId
+                    - answer
+                    additionalProperties: false
+              required:
+              - consent
+              - discoverySource
+              additionalProperties: false
+components:
+  parameters:
+    ExpectedPerson:
+      name: X-GDG-Expected-Person
+      in: header
+      required: false
+      description: Client precondition validated against the authenticated person before processing.
+      schema: { type: integer, minimum: 1 }
+  securitySchemes:
+    session:
+      type: apiKey
+      in: cookie
+      name: better-auth.session_token
+  schemas:
+    ConsentStatusResponse:
+      type: object
+      required: [success, message, data, error]
+      properties:
+        success: { const: true }
+        message: { type: string }
+        error: { type: 'null' }
+        data:
+          type: object
+          required: [versions, missing, requiresConsent]
+          properties:
+            versions: { $ref: '#/components/schemas/DocumentVersions' }
+            missing: { type: array, items: { enum: [privacy, terms] } }
+            requiresConsent: { type: boolean }
+    Consent:
+      type: object
+      properties:
+        privacy:
+          type: string
+        terms:
+          type: string
+        locale:
+          enum:
+          - ar
+          - en
+      required:
+      - privacy
+      - terms
+      - locale
+      additionalProperties: false
+    DocumentVersions:
+      type: object
+      properties:
+        privacy:
+          type: string
+        terms:
+          type: string
+      required:
+      - privacy
+      - terms
+      additionalProperties: false
+    Correction:
+      type: object
+      properties:
+        fullName:
+          type: string
+          maxLength: 255
+        phoneNumber:
+          type: string
+          pattern: "^\\+9665\\d{8}$"
+        major:
+          type: string
+          maxLength: 255
+      required: []
+      additionalProperties: false
+      minProperties: 1
+    CorrectedProfile:
+      type: object
+      properties:
+        fullName:
+          type: string
+        phoneNumber:
+          type:
+          - string
+          - 'null'
+        major:
+          type:
+          - string
+          - 'null'
+      required:
+      - fullName
+      - phoneNumber
+      - major
+      additionalProperties: false
+    Deletion:
+      type: object
+      properties:
+        personId:
+          type: integer
+          minimum: 1
+        dueAt:
+          type: string
+          format: date-time
+      required:
+      - personId
+      - dueAt
+      additionalProperties: false
+    ManualInput:
+      type: object
+      properties:
+        kind:
+          enum:
+          - objection
+          - complaint
+          - email_access
+        contactEmail:
+          type: string
+          format: email
+        personId:
+          type: integer
+          minimum: 1
+        receivedAt:
+          type: string
+          format: date-time
+      required:
+      - kind
+      additionalProperties: false
+      anyOf:
+      - required:
+        - personId
+      - required:
+        - contactEmail
+    ManualUpdate:
+      type: object
+      properties:
+        status:
+          enum:
+          - IN_PROGRESS
+          - RESOLVED
+        resolution:
+          type: string
+          maxLength: 2000
+      required:
+      - status
+      additionalProperties: false
+    SubjectRequest:
+      type: object
+      required: [id, kind, details, status, receivedAt, dueAt, resolution]
+      properties:
+        id: { type: integer }
+        kind: { enum: [objection, complaint, other, email_access] }
+        details: { type: [string, 'null'] }
+        status: { enum: [OPEN, IN_PROGRESS, RESOLVED] }
+        receivedAt: { type: string, format: date-time }
+        dueAt: { type: string, format: date-time }
+        resolution: { type: [string, 'null'] }
+    ManualRequest:
+      type: object
+      properties:
+        details: { type: [string, 'null'] }
+        id:
+          type: integer
+          minimum: 1
+        kind:
+          type: string
+        personId:
+          type:
+          - integer
+          - 'null'
+        contactEmail:
+          type:
+          - string
+          - 'null'
+        status:
+          enum:
+          - OPEN
+          - IN_PROGRESS
+          - RESOLVED
+        handlerId:
+          type:
+          - integer
+          - 'null'
+        receivedAt:
+          type: string
+          format: date-time
+        dueAt:
+          type: string
+          format: date-time
+        resolution:
+          type:
+          - string
+          - 'null'
+      required:
+      - id
+      - kind
+      - personId
+      - contactEmail
+      - status
+      - details
+      - handlerId
+      - receivedAt
+      - dueAt
+      - resolution
+      additionalProperties: false
+    Export:
+      type: object
+      properties:
+        personId:
+          type: integer
+          minimum: 1
+        fullName:
+          type: string
+        emailIdentities:
+          type: array
+          items:
+            type: object
+        rightsAudit:
+          type: array
+          items:
+            type: object
+        registrations:
+          type: array
+          items:
+            type: object
+        consents:
+          type: array
+          items:
+            type: object
+        subjectRequests:
+          type: array
+          items:
+            type: object
+        emailVerificationChallenges:
+          type: array
+          items:
+            type: object
+        handledRequests:
+          type: array
+          items:
+            type: object
+        member:
+          type:
+          - object
+          - 'null'
+        membershipRequest:
+          type:
+          - object
+          - 'null'
+        nonMemberRegistration:
+          type:
+          - object
+          - 'null'
+        pendingSignup:
+          type:
+          - object
+          - 'null'
+        deletion:
+          type:
+          - object
+          - 'null'
+        account:
+          type:
+          - object
+          - 'null'
+    ConsentSubmission:
+      type: object
+      properties:
+        consent:
+          "$ref": "#/components/schemas/Consent"
+      required:
+      - consent
+      additionalProperties: true

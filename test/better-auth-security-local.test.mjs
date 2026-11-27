@@ -1,9 +1,9 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { randomUUID } from 'node:crypto';
+import { createHmac, randomUUID } from 'node:crypto';
 import { SignJWT, generateKeyPair, exportJWK } from 'jose';
-import { PrismaPg } from '@prisma/adapter-pg';
-import { PrismaClient } from '../dist/generated/prisma/client.js';
+import { ConfigService } from '@nestjs/config';
+import { PrismaService } from '../dist/prisma/prisma.service.js';
 import { createBetterAuth } from '../dist/auth/better-auth.factory.js';
 import { AuthService } from '../dist/auth/auth.service.js';
 import { assertLocalDatabase } from '../scripts/import-supabase-auth.mjs';
@@ -12,7 +12,7 @@ const cookies = response => response.headers.getSetCookie().map(value => value.s
 async function fixture() {
   assertLocalDatabase(process.env.DATABASE_URL ?? '');
   Object.assign(process.env, { BETTER_AUTH_SECRET: 'local-security-test-secret-not-for-production-12345', FRONTEND_URL: 'http://localhost:3000', BETTER_AUTH_URL: 'http://localhost:3000', GOOGLE_CLIENT_ID: 'synthetic-client', GOOGLE_CLIENT_SECRET: 'synthetic-secret' });
-  const prisma = new PrismaClient({ adapter: new PrismaPg({ connectionString: process.env.DATABASE_URL }) });
+  const prisma = new PrismaService(new ConfigService());
   const sent = [];
   const auth = createBetterAuth(prisma, { send: async message => sent.push(message) });
   const service = new AuthService(prisma, { auth });
@@ -23,7 +23,7 @@ async function fixture() {
     const users = await prisma.authUser.findMany({ where: { OR: [{ email }, { email: `changed-${email}` }] } });
     const people = await prisma.person.findMany({ where: { OR: [{ emailPersonal: email }, { emailPersonal: `changed-${email}` }] } });
     for (const person of people) { await prisma.personEmailIdentity.deleteMany({ where: { personId: person.personId } }); await prisma.person.delete({ where: { personId: person.personId } }); }
-    await prisma.authVerification.deleteMany({ where: { value: { in: users.map(user => user.id) } } });
+    for (const user of users) await prisma.authVerification.deleteMany({ where: { value: user.id } });
     await prisma.authUser.deleteMany({ where: { id: { in: users.map(user => user.id) } } });
     await prisma.$disconnect();
   };
@@ -164,7 +164,7 @@ for (const locale of ['ar', 'en']) test(`Google signup persists ${locale} locale
     assert.equal(f.sent.filter(message => message.kind === 'welcome').length, 1);
     assert.equal(f.sent[0].locale, locale);
     assert.equal(f.sent[0].url, `http://localhost:3000/${locale}/login`);
-    assert.equal(f.sent[0].idempotencyKey, `auth-welcome-${id}`);
+    assert.equal(f.sent[0].idempotencyKey, `auth-welcome-${createHmac('sha256', process.env.BETTER_AUTH_SECRET).update(id).digest('hex')}`);
     assert.equal(await login(), id);
     assert.equal(f.sent.filter(message => message.kind === 'welcome').length, 1);
   } finally { globalThis.fetch = originalFetch; await f.clean(); }

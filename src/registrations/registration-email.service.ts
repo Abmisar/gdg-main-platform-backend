@@ -14,7 +14,6 @@ export interface RegistrationEmail {
   kind: RegistrationEmailKind;
   registrationId: number;
   to: string | null;
-  recipientName: string;
   eventName: string;
   // Set for ACCEPTED and PROMOTED: the member must confirm before this time.
   confirmationDeadline?: Date;

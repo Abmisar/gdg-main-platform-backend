@@ -212,7 +212,7 @@ components:
         description: { type: string }
         assignedMemberId: { type: string }
         assignedMemberName: { type: string }
-        createdByMemberId: { type: string }
+        createdByMemberId: { type: [string, 'null'] }
         dueAt: { type: string, format: date-time }
         priority: { type: string, enum: [HIGH, MEDIUM, LOW] }
         status: { type: string, enum: [TODO, IN_PROGRESS, PENDING_REVIEW, COMPLETED] }

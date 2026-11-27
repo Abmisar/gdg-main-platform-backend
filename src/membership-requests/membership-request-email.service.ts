@@ -6,7 +6,6 @@ export type MembershipDecisionEmailKind = 'APPROVED' | 'REJECTED';
 
 export interface MembershipDecisionEmail {
   to: string | null;
-  recipientName: string;
   decision: MembershipDecisionEmailKind;
   committeeName?: string;
   globalRoleName?: string;
@@ -91,8 +90,8 @@ export class MembershipRequestEmailService {
           ? `Congratulations You’ve Been Accepted to ${targetNameEn} ✨`
           : 'Congratulations You’ve Been Accepted! ✨'
         : `An Update on Your Application to Google Developer Groups on Campus | University of Jeddah`;
-    const greetingAr = `مرحبًا ${email.recipientName}،`;
-    const greetingEn = `Hello ${email.recipientName},`;
+    const greetingAr = 'مرحبًا،';
+    const greetingEn = 'Hello,';
     const bodyAr =
       email.decision === 'APPROVED'
         ? isCommitteeDecision

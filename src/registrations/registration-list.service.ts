@@ -196,25 +196,45 @@ export class RegistrationListService {
     const where: Prisma.EventRegistrationWhereInput = {
       eventId,
       ...(query.status ? { status: query.status } : {}),
-      ...(search
-        ? {
-            person: {
-              OR: [
-                { fullName: { contains: search, mode: 'insensitive' } },
-                { emailPersonal: { contains: search, mode: 'insensitive' } },
-                { emailUniversity: { contains: search, mode: 'insensitive' } },
-              ],
-            },
-          }
-        : {}),
     };
+    const offset = (query.page - 1) * query.pageSize;
+    let matchingCount: number | undefined;
+    if (search) {
+      const needle = search.toLowerCase();
+      const pageIds: number[] = [];
+      let cursor: number | undefined;
+      matchingCount = 0;
+      for (;;) {
+        const candidates: Array<{
+          registrationId: number;
+          person: { fullName: string; emailPersonal: string | null; emailUniversity: string | null };
+        }> = await this.prisma.eventRegistration.findMany({
+          where,
+          orderBy: [{ registeredAt: 'asc' }, { registrationId: 'asc' }],
+          ...(cursor === undefined ? {} : { cursor: { registrationId: cursor }, skip: 1 }),
+          take: 256,
+          select: {
+            registrationId: true,
+            person: { select: { fullName: true, emailPersonal: true, emailUniversity: true } },
+          },
+        });
+        for (const { registrationId, person } of candidates) {
+          if (![person.fullName, person.emailPersonal, person.emailUniversity].some(value => value?.toLowerCase().includes(needle))) continue;
+          if (matchingCount >= offset && pageIds.length < query.pageSize) pageIds.push(registrationId);
+          matchingCount++;
+        }
+        if (candidates.length < 256) break;
+        cursor = candidates[candidates.length - 1].registrationId;
+      }
+      where.registrationId = { in: pageIds };
+    }
 
-    const [total, rows, counts, checkedIn] = await this.prisma.$transaction([
+    const [rowCount, rows, counts, checkedIn] = await this.prisma.$transaction([
       this.prisma.eventRegistration.count({ where }),
       this.prisma.eventRegistration.findMany({
         where,
         orderBy: [{ registeredAt: 'asc' }, { registrationId: 'asc' }],
-        skip: (query.page - 1) * query.pageSize,
+        skip: search ? 0 : offset,
         take: query.pageSize,
         select: {
           registrationId: true,
@@ -271,6 +291,7 @@ export class RegistrationListService {
       }),
     ]);
 
+    const total = matchingCount ?? rowCount;
     const countOf = (status: RegistrationStatus) =>
       counts.find((row) => row.status === status)?._count._all ?? 0;
     const confirmed = countOf(RegistrationStatus.CONFIRMED);
@@ -429,16 +450,17 @@ export class RegistrationListService {
     });
     if (!entry) throw blacklistEntryNotFound();
 
-    const { count } = await this.prisma.registrationBlacklistEntry.updateMany({
-      where: {
-        resolvedAt: null,
-        registration: { personId: entry.registration.personId },
-      },
-      data: {
-        resolvedAt: new Date(),
-        resolvedByMemberId: actorMemberId,
-        resolutionReason: reason?.trim() || 'Removed by PR leadership',
-      },
+    const count = await this.prisma.$transaction(async tx => {
+      const where = { resolvedAt: null, registration: { personId: entry.registration.personId } };
+      const entries = await tx.registrationBlacklistEntry.findMany({where, select: {entryId:true}, orderBy:{entryId:'asc'}});
+      let changed = 0;
+      for (const row of entries) {
+        const result = await tx.registrationBlacklistEntry.updateMany({where:{...where,entryId:row.entryId},data:{
+          resolvedAt:new Date(), resolvedByMemberId:actorMemberId, resolutionReason:reason?.trim() || 'Removed by PR leadership',
+        }});
+        changed += result.count;
+      }
+      return changed;
     });
     return { entryId, resolvedEntries: count };
   }

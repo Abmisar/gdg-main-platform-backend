@@ -1,7 +1,7 @@
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import type { INestApplication } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { SchedulerRegistry } from '@nestjs/schedule';
+import { ScheduleModule, SchedulerRegistry } from '@nestjs/schedule';
 import { Test } from '@nestjs/testing';
 import request from 'supertest';
 import { AppModule } from '../src/app.module.js';
@@ -23,6 +23,7 @@ process.env.DATABASE_URL = schemaTestTarget(
 );
 process.env.ATTENDANCE_TOKEN_KEY ??= randomBytes(32).toString('base64');
 
+const consent = { privacy: '2', terms: '2', locale: 'en' };
 const HOUR = 3_600_000;
 let app: INestApplication;
 let prisma: PrismaService;
@@ -88,7 +89,7 @@ function as(personId: number | undefined) {
 async function registerVia(eventId: number, personId: number, answers = []) {
   const response = await as(personId)
     .post(`/events/${eventId}/registrations`)
-    .send({ answers, discoverySource: 'GOOGLE' })
+    .send({ consent, answers, discoverySource: 'GOOGLE' })
     .expect(201);
   return response.body.data.registrationId as number;
 }
@@ -98,7 +99,7 @@ const statusOf = (registrationId: number) =>
 
 beforeAll(async () => {
   const moduleRef = await Test.createTestingModule({
-    imports: [AppModule],
+    imports: [AppModule, ...(process.env.SCHEDULERS_ENABLED === 'false' ? [ScheduleModule.forRoot()] : [])],
   }).compile();
   app = moduleRef.createNestApplication();
   app.use(
@@ -190,15 +191,15 @@ describe('POST /events/:eventId/registrations', () => {
     const [first, second] = await Promise.all([
       as(person)
         .post(`/events/${event.eventId}/registrations`)
-        .send({ discoverySource: 'GOOGLE' }),
+        .send({ consent, discoverySource: 'GOOGLE' }),
       as(person)
         .post(`/events/${event.eventId}/registrations`)
-        .send({ discoverySource: 'GOOGLE' }),
+        .send({ consent, discoverySource: 'GOOGLE' }),
     ]);
     expect([first.status, second.status].sort()).toEqual([201, 409]);
     const again = await as(person)
       .post(`/events/${event.eventId}/registrations`)
-      .send({ discoverySource: 'GOOGLE' })
+      .send({ consent, discoverySource: 'GOOGLE' })
       .expect(409);
     expect(again.body.error.code).toBe('ALREADY_REGISTERED');
   });
@@ -220,7 +221,7 @@ describe('POST /events/:eventId/registrations', () => {
     const missing = await as(person)
       .post(`/events/${event.eventId}/registrations`)
       .send({
-        discoverySource: 'GOOGLE',
+        consent, discoverySource: 'GOOGLE',
         answers: [{ questionId: topics.questionId, answer: ['AI'] }],
       })
       .expect(400);
@@ -228,7 +229,7 @@ describe('POST /events/:eventId/registrations', () => {
     await as(person)
       .post(`/events/${event.eventId}/registrations`)
       .send({
-        discoverySource: 'GOOGLE',
+        consent, discoverySource: 'GOOGLE',
         answers: [
           { questionId: why.questionId, answer: 'Learning' },
           { questionId: topics.questionId, answer: ['Mobile'] },
@@ -239,7 +240,7 @@ describe('POST /events/:eventId/registrations', () => {
     const response = await as(person)
       .post(`/events/${event.eventId}/registrations`)
       .send({
-        discoverySource: 'GOOGLE',
+        consent, discoverySource: 'GOOGLE',
         answers: [
           { questionId: why.questionId, answer: 'Learning' },
           { questionId: topics.questionId, answer: ['AI', 'Cloud'] },
@@ -260,14 +261,14 @@ describe('POST /events/:eventId/registrations', () => {
     const closed = await createEvent({ deadlineInHours: -1 });
     const response = await as(await createPerson())
       .post(`/events/${closed.eventId}/registrations`)
-      .send({ discoverySource: 'GOOGLE' })
+      .send({ consent, discoverySource: 'GOOGLE' })
       .expect(409);
     expect(response.body.error.code).toBe('REGISTRATION_CLOSED');
 
     const open = await createEvent();
     await as(undefined)
       .post(`/events/${open.eventId}/registrations`)
-      .send({ discoverySource: 'GOOGLE' })
+      .send({ consent, discoverySource: 'GOOGLE' })
       .expect(401);
   });
 });

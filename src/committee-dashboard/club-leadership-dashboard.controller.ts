@@ -1,4 +1,5 @@
-import { Body, Controller, Delete, Get, Inject, Param, ParseIntPipe, Patch, Post, Req } from '@nestjs/common';
+import { AuditRead } from '../prisma/read-audit.js';
+import { Body, Controller, Delete, Get, Inject, Param, ParseIntPipe, DefaultValuePipe, Query, Patch, Post, Req } from '@nestjs/common';
 import { apiSuccess } from '../common/http/api-response.js';
 import type { RequestUser } from '../auth/auth.guard.js';
 import { AddMemberToCommitteeDto, AssignClubPersonDto, RemoveClubPersonDto, UpdateCommitteePointsDto } from './committee-dashboard.dto.js';
@@ -10,12 +11,19 @@ import { CreateLeadershipTaskDto, ReviewCommitteeTaskDto, UpdateLeadershipTaskDt
 export class ClubLeadershipDashboardController {
   constructor(@Inject(CommitteeDashboardService) private readonly dashboard: CommitteeDashboardService, @Inject(LeadershipTasksService) private readonly tasks: LeadershipTasksService) {}
 
+  @Get('read-audit')
+  async readAudit(@Req() request: { user?: RequestUser }) {
+    return apiSuccess(await this.dashboard.listStaffReads(request.user));
+  }
+
   @Get('dashboard')
-  async overview(@Req() request: { user?: RequestUser }) {
-    return apiSuccess(await this.dashboard.getClubLeadershipOverview(request.user));
+  @AuditRead('members.club', 'members')
+  async overview(@Req() request: { user?: RequestUser }, @Query('afterMemberId', new DefaultValuePipe(0), ParseIntPipe) afterMemberId: number, @Query('afterEventId', new DefaultValuePipe(0), ParseIntPipe) afterEventId: number) {
+    return apiSuccess(await this.dashboard.getClubLeadershipOverview(request.user, afterMemberId, afterEventId));
   }
 
   @Get('tasks')
+  @AuditRead('members.club-assignees', 'targets')
   async getTasks(@Req() request: { user?: RequestUser }) {
     return apiSuccess(await this.tasks.getClubTasks(request.user));
   }

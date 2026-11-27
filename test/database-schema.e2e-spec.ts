@@ -1,6 +1,8 @@
+import { FieldCipher } from '../src/field-encryption/field-cipher.js';
 import { randomUUID } from 'node:crypto';
 import { readFileSync } from 'node:fs';
-import { PrismaPg } from '@prisma/adapter-pg';
+import { ConfigService } from '@nestjs/config';
+import { PrismaService } from '../src/prisma/prisma.service.js';
 import { PrismaClient, Prisma } from '../src/generated/prisma/client.js';
 import { schemaTestTarget } from './schema-test-target.js';
 
@@ -69,13 +71,7 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)(
         process.env.TEST_DATABASE_URL,
         process.env.DATABASE_URL,
       );
-      db = new PrismaClient({
-        adapter: new PrismaPg({
-          connectionString,
-          max: 4,
-          connectionTimeoutMillis: 5000,
-        }),
-      });
+      db = new PrismaService(new ConfigService({ DATABASE_URL: connectionString }));
       await db.$connect();
     });
     afterAll(async () => {
@@ -140,7 +136,17 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)(
       id: number,
       values: Patch,
     ) {
-      const entries = Object.entries(values);
+      const protectedFields: Record<string, string> = {
+        excuse_reason: 'EventRegistration.excuseReason',
+        resolution_reason: 'RegistrationBlacklistEntry.resolutionReason',
+      };
+      const entries = Object.entries(values).map(([name, value]) => {
+        const field = protectedFields[name];
+        if (field && value === null) return [name + '_encrypted', null];
+        return field && typeof value === 'string'
+          ? [name + '_encrypted', new FieldCipher(process.env).encrypt(field, id, value)]
+          : [name, value];
+      });
       // Identifiers come only from literal test cases; all values are parameters.
       await tx.$executeRawUnsafe(
         `UPDATE "${table}" SET ${entries.map(([name], i) => `"${name}" = $${i + 1}`).join(', ')} WHERE "${key}" = $${entries.length + 1}`,
@@ -387,7 +393,7 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)(
         FROM committee_permission cp LEFT JOIN committee c ON c.committee_id=cp.committee_id
         ORDER BY c.committee_code, cp.committee_role, cp.code`;
       expect(rows).toEqual(approvedCommitteePolicy.permissions);
-      expect(await db.rolePermission.count()).toBe(17);
+      expect(await db.rolePermission.count()).toBe(approvedRolePermissions.length);
       expect(await db.memberRole.count()).toBe(0);
     });
 
@@ -646,12 +652,12 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)(
       });
     });
 
-    it('preserves exactly the 30 approved permission definitions', async () => {
+    it('preserves exactly the approved permission definitions', async () => {
       const rows = await db.$queryRaw`
         SELECT code, description, scope, grant_permission, is_sensitive
         FROM permission ORDER BY code`;
       expect(rows).toEqual(approvedPermissions);
-      expect(await db.rolePermission.count()).toBe(17);
+      expect(await db.rolePermission.count()).toBe(approvedRolePermissions.length);
     });
 
     it('resolves approved grant references through Prisma without role assignments', async () => {
@@ -1002,7 +1008,7 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)(
             starts_on: Date | null;
             ends_on: Date | null;
             assigned_by: number | null;
-            notes: string | null;
+            notes_encrypted: string | null;
             created_at: Date;
           }[]
         >`INSERT INTO member_role(member_id, role_code) VALUES (${f.member.memberId}, 'ADVISOR') RETURNING *`;
@@ -1012,7 +1018,7 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)(
           starts_on: null,
           ends_on: null,
           assigned_by: null,
-          notes: null,
+          notes_encrypted: null,
         });
         expect(row.id).toBeGreaterThan(0);
         expect(row.created_at).toBeInstanceOf(Date);
@@ -1116,13 +1122,13 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)(
       }, 'member_role_dates_check');
     });
 
-    it('limits assignment notes to 500 characters', async () => {
+    it('rejects plaintext in encrypted assignment notes', async () => {
       await expect(
         db.$transaction(async (tx) => {
           const f = await fixture(tx);
-          await tx.$executeRaw`INSERT INTO member_role(member_id, role_code, notes) VALUES (${f.member.memberId}, 'ADVISOR', ${'x'.repeat(501)})`;
+          await tx.$executeRaw`INSERT INTO member_role(member_id, role_code, notes_encrypted) VALUES (${f.member.memberId}, 'ADVISOR', ${'x'.repeat(501)})`;
         }),
-      ).rejects.toThrow(/22001|character varying\(500\)/);
+      ).rejects.toThrow('member_role_notes_encrypted_check');
     });
 
     it('rejects missing members, roles and assigning members', async () => {
@@ -1193,7 +1199,7 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)(
             updated_at: Date;
           }[]
         >`
-          INSERT INTO person(full_name) VALUES ('Synthetic new person') RETURNING person_id,is_active,created_at,updated_at`;
+          INSERT INTO person(person_id,full_name_encrypted) VALUES (-4101,${new FieldCipher(process.env).encrypt('Person.fullName', -4101, 'Synthetic new person')}) RETURNING person_id,is_active,created_at,updated_at`;
         expect(person.is_active).toBe(true);
         expect(person.created_at).toEqual(person.updated_at);
         const [member] = await tx.$queryRaw<
@@ -1244,7 +1250,7 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)(
       await valid(async (tx) => {
         const [person] = await tx.$queryRaw<
           { person_id: number }[]
-        >`INSERT INTO person(full_name,updated_at) VALUES ('Timestamp fixture','2000-01-01') RETURNING person_id`;
+        >`INSERT INTO person(person_id,full_name_encrypted,updated_at) VALUES (-4102,${new FieldCipher(process.env).encrypt('Person.fullName', -4102, 'Timestamp fixture')},'2000-01-01') RETURNING person_id`;
         const [member] = await tx.$queryRaw<
           { member_id: number }[]
         >`INSERT INTO member(person_id,updated_at) VALUES (${person.person_id},'2000-01-01') RETURNING member_id`;
@@ -1480,7 +1486,22 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)(
       >`SELECT conname FROM pg_constraint WHERE contype = 'c' AND connamespace = 'public'::regnamespace ORDER BY conname`;
       expect(rows.map((row) => row.conname)).toEqual([
         'announcement_action_pair_status_check',
+        'auth_account_accessToken_encrypted_check',
+        'auth_account_idToken_encrypted_check',
+        'auth_account_refreshToken_encrypted_check',
         'auth_rate_limit_bucket_request_count_check',
+        'auth_session_ipAddress_encrypted_check',
+        'auth_session_userAgent_encrypted_check',
+        'auth_user_check',
+        'auth_user_email_encrypted_check',
+        'auth_user_image_encrypted_check',
+        'auth_user_name_encrypted_check',
+        'auth_verification_check',
+        'auth_verification_check1',
+        'auth_verification_identifier_encrypted_check',
+        'auth_verification_value_encrypted_check',
+        'better_auth_rate_limit_check',
+        'better_auth_rate_limit_key_encrypted_check',
         'blacklist_resolution_check',
         'committee_code_check',
         'committee_parent_not_self_check',
@@ -1488,31 +1509,64 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)(
         'committee_permission_check',
         'committee_permission_committee_role_check',
         'committee_point_entry_delta_check',
+        'committee_point_entry_reason_encrypted_check',
+        'committee_task_description_encrypted_check',
         'committee_task_event_scope_check',
         'committee_task_priority_check',
         'committee_task_scope_check',
         'committee_task_status_check',
+        'committee_task_title_encrypted_check',
         'email_verification_challenge_attempts_check',
+        'email_verification_challenge_email_encrypted_check',
         'email_verification_challenge_purpose_check',
         'event_questions_options_check',
         'event_questions_position_check',
+        'event_registrations_excuse_reason_encrypted_check',
         'events_capacity_check',
         'events_confirmation_window_check',
         'events_schedule_check',
         'global_point_entry_delta_check',
+        'global_point_entry_reason_encrypted_check',
+        'manual_rights_request_check',
+        'manual_rights_request_contact_email_encrypted_check',
+        'manual_rights_request_details_encrypted_check',
+        'manual_rights_request_resolution_encrypted_check',
         'member_committee_role_check',
         'member_member_type_check',
         'member_role_dates_check',
+        'member_role_notes_encrypted_check',
+        'membership_request_application_data_encrypted_check',
         'membership_request_committee_approval_scope_check',
         'membership_request_committee_decision_check',
         'membership_request_committee_requested_role_check',
         'membership_request_global_role_allowed_check',
         'membership_request_global_role_decision_check',
+        'non_member_registration_application_data_encrypted_check',
+        'pending_signup_application_data_encrypted_check',
         'pending_signup_registration_type_check',
         'permission_code_check',
         'permission_scope_check',
+        'person_bio_encrypted_check',
+        'person_branch_encrypted_check',
+        'person_check',
+        'person_check1',
+        'person_check2',
+        'person_email_identity_check',
+        'person_email_identity_email_encrypted_check',
         'person_email_identity_kind_check',
-        'person_full_name_check',
+        'person_email_personal_encrypted_check',
+        'person_email_university_encrypted_check',
+        'person_full_name_encrypted_check',
+        'person_gender_encrypted_check',
+        'person_github_url_encrypted_check',
+        'person_major_encrypted_check',
+        'person_phone_number_encrypted_check',
+        'person_portfolio_url_encrypted_check',
+        'person_profile_image_url_encrypted_check',
+        'person_university_encrypted_check',
+        'person_x_url_encrypted_check',
+        'registration_answers_answer_text_encrypted_check',
+        'registration_blacklist_entrie_resolution_reason_encrypted_check',
         'registration_email_delivery_lease_check',
         'registrations_approval_check',
         'registrations_cancellation_check',
@@ -1522,7 +1576,14 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)(
         'registrations_token_check',
         'registrations_waitlist_position_check',
         'role_code_check',
+        'signup_verification_application_data_encrypted_check',
         'signup_verification_attempts_check',
+        'signup_verification_check',
+        'signup_verification_email_personal_encrypted_check',
+        'signup_verification_email_university_encrypted_check',
+        'signup_verification_full_name_encrypted_check',
+        'staff_read_audit_count_check',
+        'staff_read_audit_status_check',
         'wallet_barcode_alias_barcode_hash_check',
       ]);
     });
@@ -1714,8 +1775,8 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)(
         'registrations_token_check',
       ],
       [
-        'partial check-in',
-        { status: 'CONFIRMED', ...confirmation, checked_in_at: cancelled },
+        'check-in staff without timestamp',
+        { status: 'CONFIRMED', ...confirmation, checked_in_by_member_id: 0 },
         'registrations_check_in_check',
       ],
       [
@@ -1773,7 +1834,7 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)(
     );
 
     it.each<[string, string, Patch, string]>([
-      ['blank name', 'person', { full_name: '   ' }, 'person_full_name_check'],
+      ['plaintext name', 'person', { full_name_encrypted: 'Synthetic' }, 'person_full_name_encrypted_check'],
       ['self parent', 'committee', {}, 'committee_parent_not_self_check'],
       ['zero capacity', 'events', { capacity: 0 }, 'events_capacity_check'],
       [
@@ -1936,7 +1997,7 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)(
       {
         resolved_at: cancelled,
         resolved_by_member_id: 0,
-        resolution_reason: ' ',
+        resolution_reason: null,
       },
       {
         resolved_at: new Date('2029-01-01T00:00:00Z'),
@@ -1970,13 +2031,7 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)(
     it('rejects answers belonging to another event and duplicate answers', async () => {
       await invalid(async (tx, f) => {
         const other = await fixture(tx);
-        await tx.$executeRawUnsafe(
-          'INSERT INTO registration_answers(registration_id, question_id, event_id, answer_text) VALUES ($1,$2,$3,$4)',
-          f.registration.registrationId,
-          other.question.questionId,
-          f.event.eventId,
-          'Answer',
-        );
+        await tx.registrationAnswer.create({ data: { registrationId: f.registration.registrationId, questionId: other.question.questionId, eventId: f.event.eventId, answerText: 'Answer' } });
       }, 'registration_answers_question_id_event_id_fkey');
       await invalid(async (tx, f) => {
         const data = {
@@ -1986,13 +2041,7 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)(
           answerText: 'Answer',
         };
         await tx.registrationAnswer.create({ data });
-        await tx.$executeRawUnsafe(
-          'INSERT INTO registration_answers(registration_id, question_id, event_id, answer_text) VALUES ($1,$2,$3,$4)',
-          data.registrationId,
-          data.questionId,
-          data.eventId,
-          'Other answer',
-        );
+        await tx.registrationAnswer.create({ data: { registrationId: data.registrationId, questionId: data.questionId, eventId: data.eventId, answerText: 'Other answer' } });
       }, 'registration_answers_registration_id_question_id_key');
     });
 
@@ -2071,7 +2120,7 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)(
               },
             });
           },
-          'uq_person_email_personal',
+          'person_email_personal_idx_key',
         );
       }
       await invalid(async (tx, f) => {
@@ -2135,13 +2184,7 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)(
     it('enforces registration-side composite FK and referenced history deletion restrictions', async () => {
       await invalid(async (tx, f) => {
         const other = await fixture(tx);
-        await tx.$executeRawUnsafe(
-          'INSERT INTO registration_answers(registration_id,question_id,event_id,answer_text) VALUES ($1,$2,$3,$4)',
-          f.registration.registrationId,
-          other.question.questionId,
-          other.event.eventId,
-          'Answer',
-        );
+        await tx.registrationAnswer.create({ data: { registrationId: f.registration.registrationId, questionId: other.question.questionId, eventId: other.event.eventId, answerText: 'Answer' } });
       }, 'registration_answers_registration_id_event_id_fkey');
       await valid(async (tx, f) => {
         await tx.member.delete({ where: { memberId: f.member.memberId } });

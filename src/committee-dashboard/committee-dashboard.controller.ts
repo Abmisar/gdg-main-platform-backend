@@ -1,3 +1,4 @@
+import { AuditRead } from '../prisma/read-audit.js';
 import {
   BadRequestException,
   Body,
@@ -55,6 +56,7 @@ export class CommitteeDashboardController {
   ) {}
 
   @Get('dashboard')
+  @AuditRead('members.committee', 'members')
   async getDashboard(
     @Req() request: { user?: RequestUser },
     @Param('committeeCode') committeeCode: string,
@@ -72,6 +74,7 @@ export class CommitteeDashboardController {
   }
 
   @Get('managed-events')
+  @AuditRead('members.project-assignees', 'targets')
   async getManagedEvents(@Req() request: { user?: RequestUser }, @Param('committeeCode') committeeCode: string) {
     this.assertProjectManagementRoute(committeeCode);
     return apiSuccess(await this.leadershipTasks.getProjectEvents(request.user));
