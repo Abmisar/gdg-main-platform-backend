@@ -44,9 +44,9 @@ async function scan(cipher, mode, batchSize, transaction) {
       : 'int';
     let cursor = null;
     const columns = [pk];
-    for (const { column, index, json } of Object.values(fields)) {
+    for (const { column, index, json, encryptedOnly } of Object.values(fields)) {
       columns.push(quote(column + '_encrypted'));
-      if (mode !== 'rotate') {
+      if (mode !== 'rotate' && !encryptedOnly) {
         columns.push(quote(column));
         if (json) columns.push(column + ' IS NULL AS ' + column + '_absent');
       }
@@ -77,7 +77,7 @@ async function scan(cipher, mode, batchSize, transaction) {
             values.push(value);
             assignments.push(quote(column) + ' = $' + values.length + cast);
           }
-          for (const [name, { column, index, json }] of Object.entries(
+          for (const [name, { column, index, json, encryptedOnly }] of Object.entries(
             fields,
           )) {
             const field = model + '.' + name;
@@ -86,9 +86,10 @@ async function scan(cipher, mode, batchSize, transaction) {
               encrypted === null
                 ? null
                 : cipher.decrypt(field, row[pk], encrypted);
-            const plain = mode === 'rotate' ? decoded : row[column];
+            const useEnvelope = mode === 'rotate' || encryptedOnly;
+            const plain = useEnvelope ? decoded : row[column];
             const absent =
-              mode === 'rotate'
+              useEnvelope
                 ? encrypted === null
                 : json
                   ? row[column + '_absent']

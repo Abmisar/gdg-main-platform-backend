@@ -1,5 +1,6 @@
 export interface Field {
   column: string;
+  encryptedOnly?: boolean;
   index?: boolean;
   json?: boolean;
 }
@@ -101,7 +102,7 @@ export const storage: Record<string, Storage> = {
     table: 'committee_point_entry',
     pk: 'point_entry_id',
     fields: {
-      recipientName: { column: 'recipient_name' },
+      recipientName: { column: 'recipient_name', encryptedOnly: true },
       reason: { column: 'reason' },
     },
   },
@@ -109,7 +110,7 @@ export const storage: Record<string, Storage> = {
     table: 'global_point_entry',
     pk: 'point_entry_id',
     fields: {
-      recipientName: { column: 'recipient_name' },
+      recipientName: { column: 'recipient_name', encryptedOnly: true },
       reason: { column: 'reason' },
     },
   },
