@@ -1,0 +1,8 @@
+ingress:
+  - hostname: gdguj.org
+    service: http://gdg-frontend:3000
+  - hostname: www.gdguj.org
+    service: http://gdg-frontend:3000
+  - hostname: api.gdguj.org
+    service: http://gdg-backend:3001
+  - service: http_status:404

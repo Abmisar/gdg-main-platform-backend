@@ -1,0 +1,10 @@
+[Unit]
+Description=Nightly GDG backup
+
+[Timer]
+OnCalendar=*-*-* 00:30:00 UTC
+Persistent=yes
+RandomizedDelaySec=5m
+
+[Install]
+WantedBy=timers.target

@@ -1,0 +1,96 @@
+name: gdg-oracle
+x-runtime: &runtime
+  platform: linux/arm64
+  restart: unless-stopped
+  security_opt: [no-new-privileges:true]
+  cap_drop: [ALL]
+  logging:
+    driver: json-file
+    options:
+      max-size: 10m
+      max-file: "3"
+
+services:
+  backend:
+    <<: *runtime
+    networks:
+      app:
+        aliases: [gdg-backend]
+      backend_egress:
+        gw_priority: 1
+    environment:
+      TRUSTED_CF_PROXY_IPS: ${APP_NETWORK_PREFIX:?network prefix required}.2,${APP_NETWORK_PREFIX}.3
+    container_name: gdg-backend
+    image: gdg-backend:${RELEASE_TAG:?release tag required}
+    build:
+      context: ${BACKEND_SOURCE:-${HOME}/backend}
+      dockerfile: Dockerfile
+    env_file:
+      - path: ${GDG_CONFIG:-${HOME}/.config/gdg}/backend.env
+        format: raw
+    deploy:
+      replicas: 1
+    healthcheck:
+      test: [CMD, node, -e, "fetch('http://127.0.0.1:3001/health/ready').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 30s
+      start_period: 30s
+      timeout: 8s
+      retries: 3
+  frontend:
+    <<: *runtime
+    image: gdg-frontend:${RELEASE_TAG:?release tag required}
+    build:
+      context: ${FRONTEND_SOURCE:-${HOME}/frontend}
+      dockerfile: Dockerfile.oracle
+      args:
+        API_PROXY_TARGET: ${API_PROXY_TARGET:?internal API origin required}
+        CSP_IMAGE_ORIGINS: ${CSP_IMAGE_ORIGINS:?storage origin required}
+        CSP_REPORT_URI: ${CSP_REPORT_URI:-}
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:?public API origin required}
+    env_file:
+      - path: ${GDG_CONFIG:-${HOME}/.config/gdg}/frontend.env
+        format: raw
+    networks:
+      app:
+        aliases: [gdg-frontend]
+        ipv4_address: ${APP_NETWORK_PREFIX}.3
+      frontend_egress:
+        gw_priority: 1
+    healthcheck:
+      test: [CMD, node, -e, "fetch('http://127.0.0.1:3000/colorful-logo.svg',{redirect:'manual'}).then(r=>process.exit(r.status===200?0:1)).catch(()=>process.exit(1))"]
+      interval: 30s
+      start_period: 20s
+      timeout: 5s
+      retries: 3
+  cloudflared:
+    <<: *runtime
+    networks:
+      app:
+        ipv4_address: ${APP_NETWORK_PREFIX}.2
+      tunnel_egress:
+        gw_priority: 1
+    image: ${TUNNEL_IMAGE:?tunnel image digest required}
+    command: [tunnel, --no-autoupdate, run]
+    environment:
+      TUNNEL_METRICS: 127.0.0.1:2000
+    env_file:
+      - path: ${GDG_CONFIG:-${HOME}/.config/gdg}/tunnel.env
+        format: raw
+    healthcheck:
+      test: [CMD, cloudflared, tunnel, ready]
+      interval: 30s
+      timeout: 5s
+      start_period: 30s
+      retries: 3
+
+networks:
+  app:
+    name: ${COMPOSE_PROJECT_NAME}-app-${APP_NETWORK_PREFIX}
+    internal: true
+    ipam:
+      config:
+        - subnet: ${APP_NETWORK_PREFIX}.0/24
+          ip_range: ${APP_NETWORK_PREFIX}.128/25
+  backend_egress: {}
+  frontend_egress: {}
+  tunnel_egress: {}

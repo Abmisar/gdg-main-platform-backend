@@ -1,4 +1,4 @@
-FROM node:24.20.0-bookworm AS base
+FROM docker.io/library/node:24.20.0-bookworm AS base
 WORKDIR /app
 RUN corepack enable && corepack prepare pnpm@12.3.4 --activate
 
