@@ -1,0 +1,9 @@
+[Unit]
+Description=Nightly committee reporting export
+
+[Timer]
+OnCalendar=*-*-* 02:30:00 Asia/Riyadh
+Persistent=yes
+
+[Install]
+WantedBy=timers.target

@@ -1,6 +1,7 @@
 ARG POSTGRES_IMAGE
 FROM ${POSTGRES_IMAGE}
 RUN apt-get update && apt-get install -y --no-install-recommends age python3-cryptography python3-boto3 python3-psycopg && rm -rf /var/lib/apt/lists/*
+COPY export-reporting.py /opt/gdg/
 COPY asset_urls.py backfill-assets.py /opt/gdg/
 COPY snapshot-jeddah.py /opt/gdg/snapshot.py
 WORKDIR /opt/gdg

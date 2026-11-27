@@ -1,0 +1,5 @@
+# Requesting reporting changes
+
+Send the Lead (GDG on Campus UJ, controller) a proposal with the dashboard question, intended audience, decision it supports, desired grain and refresh frequency, required source fields, retention period, destination and a synthetic example. Record the decision and reviewer on the repository change. Use invented values in requests and tests.
+
+The maintainer checks the encrypted-field registry, source retention and deletion behavior. The Lead reviews necessity, purpose, authorized access, KSA processing and storage, and whether existing aggregates answer the question. Test the complete combination of slicers with four and five distinct people, repeated actions by one person, totals and complementary cells, joins to event or committee metadata, prior exports and before/after erasure. Withhold or coarsen a field if comparisons could identify someone. Update the grants allowlist, dictionary, export manifest, measures and tests together. Review roster access when people change roles.

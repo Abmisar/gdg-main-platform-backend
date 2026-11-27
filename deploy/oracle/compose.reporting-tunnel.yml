@@ -1,0 +1,9 @@
+services:
+  cloudflared:
+    networks:
+      reporting_database: {}
+
+networks:
+  reporting_database:
+    external: true
+    name: gdg-prod_database

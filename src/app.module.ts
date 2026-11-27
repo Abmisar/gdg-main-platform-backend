@@ -1,3 +1,4 @@
+import { ReportingService } from './reporting/reporting.service.js';
 import { RightsController } from './data-rights/rights.controller.js';
 import { RightsService } from './data-rights/rights.service.js';
 import { Module } from '@nestjs/common';
@@ -34,6 +35,7 @@ import { RetentionModule } from './retention/retention.module.js';
   ],
   controllers: [RightsController, AppController, HealthController],
   providers: [
+    ReportingService,
     RightsService,
     AppService,
     { provide: APP_INTERCEPTOR, useClass: ReadAuditInterceptor },

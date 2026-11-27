@@ -1,0 +1,7 @@
+[Unit]
+Description=Export the committee reporting views to Jeddah
+
+[Service]
+Type=oneshot
+ExecStart=%h/.local/state/gdg/prod/current/snapshot-run.sh reporting-export
+UMask=0077

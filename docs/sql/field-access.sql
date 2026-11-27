@@ -2,7 +2,7 @@ BEGIN;
 DO $$
 DECLARE principal text;
 BEGIN
-  FOREACH principal IN ARRAY ARRAY['gdg_migrate','gdg_app','gdg_audit_reader'] LOOP
+  FOREACH principal IN ARRAY ARRAY['gdg_migrate','gdg_app','gdg_audit_reader','gdg_reporting'] LOOP
     IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = principal) THEN
       EXECUTE format('CREATE ROLE %I LOGIN NOSUPERUSER NOCREATEROLE NOCREATEDB NOREPLICATION NOBYPASSRLS', principal);
     END IF;
@@ -111,6 +111,27 @@ BEGIN
     ALTER VIEW public.recent_staff_reads OWNER TO gdg_migrate;
     REVOKE ALL ON public.recent_staff_reads FROM PUBLIC, gdg_app;
     GRANT SELECT ON public.recent_staff_reads TO gdg_audit_reader;
+  END IF;
+END $$;
+ALTER ROLE gdg_reporting CONNECTION LIMIT 4;
+ALTER ROLE gdg_reporting SET statement_timeout = '30s';
+ALTER ROLE gdg_reporting SET default_transaction_read_only = on;
+ALTER ROLE gdg_reporting SET search_path = reporting, pg_catalog;
+DO $$
+BEGIN
+  EXECUTE format('GRANT CONNECT ON DATABASE %I TO gdg_reporting', current_database());
+  IF to_regnamespace('reporting') IS NOT NULL THEN
+    REVOKE ALL ON SCHEMA public FROM PUBLIC, gdg_reporting;
+    GRANT USAGE ON SCHEMA reporting TO gdg_reporting;
+    GRANT SELECT ON reporting.dim_date, reporting.dim_committee, reporting.dim_event,
+      reporting.dim_member_pseudo, reporting.dim_application_status, reporting.fact_applications,
+      reporting.fact_decisions, reporting.fact_registrations, reporting.fact_attendance, reporting.fact_points,
+      reporting.fact_membership_changes, reporting.fact_retention, reporting.fact_email_delivery TO gdg_reporting;
+    GRANT USAGE ON SCHEMA reporting_private TO gdg_app;
+    GRANT SELECT, INSERT ON reporting_private.calendar, reporting_private.member_key TO gdg_app;
+    GRANT SELECT, INSERT, UPDATE, DELETE ON reporting_private.assignment, reporting_private.roster,
+      reporting_private.run, reporting_private.change TO gdg_app;
+    GRANT EXECUTE ON FUNCTION reporting_private.refresh_roster(date) TO gdg_app;
   END IF;
 END $$;
 COMMIT;

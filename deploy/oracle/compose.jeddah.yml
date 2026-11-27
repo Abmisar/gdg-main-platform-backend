@@ -23,10 +23,12 @@ services:
         format: raw
       - path: ${GDG_CONFIG:-${HOME}/.config/gdg}/pitr.env
         format: raw
+        required: false
     environment:
       POSTGRES_DB: gdg
       POSTGRES_INITDB_ARGS: --auth-host=scram-sha-256
-    command: [postgres, -c, shared_buffers=512MB, -c, work_mem=4MB, -c, maintenance_work_mem=128MB, -c, max_connections=60, -c, archive_mode=on, -c, archive_timeout=300s, -c, "archive_command=pgbackrest --stanza=gdg archive-push %p"]
+    command: [sh, -c, 'if [ -n "$$PGBACKREST_REPO1_S3_ENDPOINT" ]; then exec docker-entrypoint.sh postgres -c shared_buffers=512MB -c work_mem=4MB -c maintenance_work_mem=128MB -c max_connections=60 -c log_connections=authorization -c log_disconnections=on -c archive_mode=on -c archive_timeout=300s -c "archive_command=pgbackrest --stanza=gdg archive-push %p"; else exec docker-entrypoint.sh postgres -c shared_buffers=512MB -c work_mem=4MB -c maintenance_work_mem=128MB -c max_connections=60 -c log_connections=authorization -c log_disconnections=on; fi']
+    entrypoint: []
     mem_limit: 3g
     shm_size: 256m
     networks: [database, archive_egress]
@@ -55,6 +57,19 @@ services:
       PGHOST: postgres
       PGPORT: 5432
     entrypoint: [python3, /opt/gdg/snapshot.py]
+  reporting-export:
+    profiles: [maintenance]
+    image: gdg-backup:${RELEASE_TAG:?release tag required}
+    platform: linux/arm64
+    networks: [database, backup_egress]
+    env_file:
+      - path: ${GDG_CONFIG:-${HOME}/.config/gdg}/reporting-export.env
+        format: raw
+        required: false
+    environment:
+      PGHOST: postgres
+      PGDATABASE: gdg
+    entrypoint: [python3, /opt/gdg/export-reporting.py]
   backend:
     <<: *runtime
     depends_on:
