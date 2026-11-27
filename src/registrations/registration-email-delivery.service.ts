@@ -45,7 +45,7 @@ export class RegistrationEmailDeliveryService {
     if (!delivery) throw registrationNotFound();
     const { count } = await this.prisma.registrationEmailDelivery.updateMany({
       where: { id: delivery.id, state: 'FAILED' },
-      data: { state: 'PENDING' },
+      data: { state: 'PENDING', retryCount: { increment: 1 } },
     });
     if (!count)
       throw new ConflictException(

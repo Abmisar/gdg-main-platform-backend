@@ -667,6 +667,7 @@ model RegistrationEmailDelivery {
   id             Int                    @id @default(autoincrement())
   registrationId Int                   @map("registration_id")
   kind           RegistrationEmailKind
+  retryCount     Int                    @default(0) @map("retry_count")
   state          RegistrationEmailState @default(PENDING)
   leaseExpiresAt DateTime?              @map("lease_expires_at") @db.Timestamptz(3)
 

@@ -107,7 +107,7 @@ export class GuestWalletRelayService {
             where: { kind: 'CONFIRMED' },
             orderBy: { id: 'desc' },
             take: 1,
-            select: { id: true, state: true },
+            select: { id: true, state: true, retryCount: true },
           },
         },
       });
@@ -170,6 +170,7 @@ export class GuestWalletRelayService {
         projection,
         committee: event.committee.committeeCode,
         deliveryId,
+        retryCount: email?.retryCount,
       };
     });
   }
@@ -203,12 +204,12 @@ export class GuestWalletRelayService {
     });
     if (!committed.count || !deliveryId || result.walletState !== 'PUBLISHED') return;
     // An earlier owner-side send can still have a live lease during rollout.
-    if (result.deliveryId === deliveryId) {
+    if (request.retryCount === 0 && result.deliveryId === deliveryId) {
       const state = result.emailState;
       if (state === 'PENDING' || state === 'SENDING') return;
       if (state === 'SENT' || state === 'FAILED' || state === 'SKIPPED') {
         await this.prisma.registrationEmailDelivery.updateMany({
-          where: { id: deliveryId, state: 'PENDING' },
+          where: { id: deliveryId, state: 'PENDING', retryCount: 0 },
           data: { state },
         });
         return;
