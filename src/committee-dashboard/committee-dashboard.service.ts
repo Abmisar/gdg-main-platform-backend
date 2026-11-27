@@ -1,3 +1,4 @@
+import { parseRiyadhDateTime } from './riyadh-date-time.js';
 import { LeadershipAuditReader } from '../prisma/leadership-audit-reader.js';
 import { directoryOrder } from './directory-order.js';
 import { removeMember } from './remove-member.js';
@@ -609,9 +610,9 @@ export class CommitteeDashboardService {
     const { committee, memberId } = await this.requireMembership(user, committeeCode);
     await this.requirePermission(memberId, EVENTS_PERMISSION, committee.committeeId);
 
-    const startsAt = new Date(dto.startsAt);
-    const endsAt = new Date(dto.endsAt);
-    const registrationDeadline = new Date(dto.registrationDeadline);
+    const startsAt = parseRiyadhDateTime(dto.startsAt);
+    const endsAt = parseRiyadhDateTime(dto.endsAt);
+    const registrationDeadline = parseRiyadhDateTime(dto.registrationDeadline);
     const whatsappGroupLink = dto.whatsappGroupLink?.trim() || null;
     const questions = (dto.questions ?? []).map((question) => ({
       ...question,
@@ -759,10 +760,10 @@ export class CommitteeDashboardService {
       `;
       if (!locked) throw new NotFoundException();
       if (!locked.published && !locked.draft) throw new ConflictException('This event is closed for editing.');
-      const startsAt = dto.startsAt === undefined ? locked.startsAt : new Date(dto.startsAt);
-      const endsAt = dto.endsAt === undefined ? locked.endsAt : new Date(dto.endsAt);
+      const startsAt = dto.startsAt === undefined ? locked.startsAt : parseRiyadhDateTime(dto.startsAt);
+      const endsAt = dto.endsAt === undefined ? locked.endsAt : parseRiyadhDateTime(dto.endsAt);
       const registrationDeadline = dto.registrationDeadline === undefined
-        ? locked.registrationDeadline : new Date(dto.registrationDeadline);
+        ? locked.registrationDeadline : parseRiyadhDateTime(dto.registrationDeadline);
       const nextEventType = dto.eventType ?? locked.eventType;
       const nextWhatsappGroupLink = dto.whatsappGroupLink === undefined
         ? locked.whatsappGroupLink
@@ -1079,7 +1080,7 @@ export class CommitteeDashboardService {
         description: dto.description?.trim() ?? '',
         assignedMemberId: dto.assignedMemberId,
         createdByMemberId: memberId,
-        dueAt: new Date(dto.dueAt),
+        dueAt: parseRiyadhDateTime(dto.dueAt),
         priority: dto.priority,
         status: dto.status ?? CommitteeTaskStatus.TODO,
         taskScope: 'COMMITTEE',
@@ -1103,7 +1104,7 @@ export class CommitteeDashboardService {
         ...(dto.title !== undefined ? { title: dto.title.trim() } : {}),
         ...(dto.description !== undefined ? { description: dto.description.trim() } : {}),
         ...(dto.assignedMemberId !== undefined ? { assignedMemberId: dto.assignedMemberId } : {}),
-        ...(dto.dueAt !== undefined ? { dueAt: new Date(dto.dueAt) } : {}),
+        ...(dto.dueAt !== undefined ? { dueAt: parseRiyadhDateTime(dto.dueAt) } : {}),
         ...(dto.priority !== undefined ? { priority: dto.priority } : {}),
         ...(dto.status !== undefined ? { status: dto.status } : {}),
       },
