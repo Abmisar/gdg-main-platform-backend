@@ -313,7 +313,10 @@ describe('PUT /events/:eventId/waitlist', () => {
         .put(`/events/${event.eventId}/waitlist`)
         .send({ registrationIds })
         .expect(409);
-      expect(response.body.errorCode).toBe('WAITLIST_ORDER_IMMUTABLE');
+      expect(response.body.error.code).toBe('CONFLICT');
+      await expect(review.setWaitlist(event.eventId, registrationIds, prMemberId)).rejects.toMatchObject({
+        errorCode: 'WAITLIST_ORDER_IMMUTABLE',
+      });
     }
     for (const [index, id] of [a, b, c, d].entries()) {
       expect((await statusOf(id)).waitlistPosition).toBe(index + 1);

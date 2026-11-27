@@ -1300,6 +1300,11 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)(
             identity_generation: 'BY DEFAULT',
           },
           {
+            table_name: 'member',
+            column_name: 'membership_number',
+            identity_generation: 'ALWAYS',
+          },
+          {
             table_name: 'member_committee',
             column_name: 'id',
             identity_generation: 'BY DEFAULT',
@@ -1518,6 +1523,7 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)(
         'registrations_waitlist_position_check',
         'role_code_check',
         'signup_verification_attempts_check',
+        'wallet_barcode_alias_barcode_hash_check',
       ]);
     });
 

@@ -113,7 +113,7 @@ beforeAll(async () => {
       next();
     },
   );
-  await app.init();
+  await app.listen(0, '127.0.0.1');
   app
     .get(SchedulerRegistry)
     .getCronJob('registration-confirmation-expiry')
