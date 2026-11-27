@@ -1,6 +1,9 @@
+import { ProfileName } from './profile-validation.js';
+import { SignupConsentSubmission, RequiredSkills } from './signup-consent.dto.js';
 import {
   ArrayUnique,
   IsArray,
+  IsDefined,
   IsEmail,
   IsIn,
   IsObject,
@@ -17,14 +20,14 @@ class SignupApplicationDataDto {
   @IsString() @MaxLength(50) phoneNumber: string;
   @IsOptional() @IsEmail() @MaxLength(255) universityEmail?: string;
   @IsString() @MaxLength(255) university: string;
-  @IsOptional() @IsString() @MaxLength(100)
+  @IsString() @MaxLength(100)
   @Matches(/^[^\u0000-\u001F\u007F-\u009F]*\S[^\u0000-\u001F\u007F-\u009F]*$/)
-  branch?: string;
+  branch: string;
   @IsString() @MaxLength(255) college: string;
   @IsString() @MaxLength(255) major: string;
   @IsString() @MaxLength(30) level: string;
   @IsIn(['female', 'male']) gender: string;
-  @IsOptional() @IsObject() skillsByCommittee?: Record<string, string[]>;
+  @RequiredSkills() @IsObject() skillsByCommittee: Record<string, string[]>;
 }
 
 class SignupCommitteeDto {
@@ -32,12 +35,10 @@ class SignupCommitteeDto {
   @IsIn(['Leader', 'Co-Leader', 'Advisor', 'Member']) requestedRole: string;
 }
 
-export class SignupDto {
+export class SignupDto extends SignupConsentSubmission {
   @IsOptional() @IsIn(['en', 'ar']) locale?: 'en' | 'ar';
 
-  @IsString({ message: 'fullName must be text.' })
-  @Matches(/\S/, { message: 'fullName is required.' })
-  @MaxLength(255, { message: 'fullName must be at most 255 characters.' })
+  @ProfileName()
   fullName: string;
 
   @IsEmail({}, { message: 'email must be a valid email address.' })
@@ -57,6 +58,8 @@ export class SignupDto {
   @IsIn(['MEMBER', 'NON_MEMBER'])
   registrationType: 'MEMBER' | 'NON_MEMBER';
 
+  @IsDefined()
+  @IsObject()
   @ValidateNested()
   @Type(() => SignupApplicationDataDto)
   applicationData: SignupApplicationDataDto;

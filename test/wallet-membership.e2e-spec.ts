@@ -1,7 +1,8 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { APP_GUARD } from '@nestjs/core';
 import { Test } from '@nestjs/testing';
-import { PrismaPg } from '@prisma/adapter-pg';
+import { LeadershipAuditReader } from '../src/prisma/leadership-audit-reader.js';
+import { ConfigService } from '@nestjs/config';
 import request from 'supertest';
 import { AuthGuard } from '../src/auth/auth.guard.js';
 import { BetterAuthService } from '../src/auth/better-auth.service.js';
@@ -9,7 +10,6 @@ import { AuthService } from '../src/auth/auth.service.js';
 import { CommitteeDashboardController } from '../src/committee-dashboard/committee-dashboard.controller.js';
 import { CommitteeDashboardService } from '../src/committee-dashboard/committee-dashboard.service.js';
 import { LeadershipTasksService } from '../src/committee-dashboard/leadership-tasks.service.js';
-import { PrismaClient } from '../src/generated/prisma/client.js';
 import { PrismaService } from '../src/prisma/prisma.service.js';
 import { CommitteeAccessService } from '../src/registrations/committee-access.service.js';
 import { schemaTestTarget } from './schema-test-target.js';
@@ -17,7 +17,7 @@ import { schemaTestTarget } from './schema-test-target.js';
 describe.skipIf(!process.env.TEST_DATABASE_URL)('Wallet membership links', () => {
   it('uses one public number across card pairs and limits link status to the current committee leader', async () => {
     const connectionString = schemaTestTarget(process.env.TEST_DATABASE_URL, process.env.DATABASE_URL);
-    const db = new PrismaClient({ adapter: new PrismaPg({ connectionString }) });
+    const db = new PrismaService(new ConfigService({ DATABASE_URL: connectionString }));
     const rollback = new Error('Discard synthetic Wallet fixtures');
 
     try {
@@ -74,8 +74,9 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)('Wallet membership links', () =>
           providers: [
             CommitteeDashboardService,
             CommitteeAccessService,
+            LeadershipAuditReader,
             { provide: LeadershipTasksService, useValue: {} },
-            { provide: PrismaService, useValue: tx },
+            { provide: PrismaService, useValue: { person: tx.person, memberCommittee: tx.memberCommittee, member: tx.member, walletMembershipLink: tx.walletMembershipLink, memberRole: tx.memberRole, committee: tx.committee } },
             {
               provide: BetterAuthService,
               useValue: {

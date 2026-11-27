@@ -1,3 +1,4 @@
+import type { ConsentEvidence } from '../data-rights/consent.js';
 import { randomUUID } from 'node:crypto';
 import {
   ConflictException,
@@ -67,7 +68,7 @@ export class MembershipRequestService {
     private readonly emails?: MembershipRequestEmailService,
   ) {}
 
-  async create(user: AuthenticatedUser, body: CreateMembershipRequestDto) {
+  async create(user: AuthenticatedUser, body: CreateMembershipRequestDto, evidence: ConsentEvidence) {
     const person = await this.prisma.person.findUnique({
       where: { personId: user.personId },
       select: { emailPersonalVerifiedAt: true },
@@ -93,24 +94,27 @@ export class MembershipRequestService {
 
     const applicationData = JSON.parse(JSON.stringify(body.applicationData));
     try {
-      const request = await this.prisma.membershipRequest.create({
-        data: {
-          personId: user.personId,
-          applicationData,
-          committees: {
-            create: body.committees.map((item) => {
-              const committee = committees.find(
-                (c) => c.committeeCode === item.committeeCode,
-              )!;
-              return {
-                committeeId: committee.committeeId,
-                requestedRole: item.requestedRole,
-                approvalScope: approvalScopeFor(committee, item.requestedRole),
-              };
-            }),
+      const request = await this.prisma.$transaction(async tx => {
+        await tx.consentRecord.createMany({ data: evidence.map(row => ({ ...row, personId: user.personId })) });
+        return tx.membershipRequest.create({
+          data: {
+            personId: user.personId,
+            applicationData,
+            committees: {
+              create: body.committees.map((item) => {
+                const committee = committees.find(
+                  (c) => c.committeeCode === item.committeeCode,
+                )!;
+                return {
+                  committeeId: committee.committeeId,
+                  requestedRole: item.requestedRole,
+                  approvalScope: approvalScopeFor(committee, item.requestedRole),
+                };
+              }),
+            },
           },
-        },
-        include: requestInclude,
+          include: requestInclude,
+        });
       });
       return this.serialize(request);
     } catch (error) {
@@ -610,7 +614,6 @@ export class MembershipRequestService {
   private async sendCommitteeDecisionEmail(
     request: {
       person?: {
-        fullName?: string;
         emailPersonal?: string | null;
         emailUniversity?: string | null;
       };
@@ -626,7 +629,6 @@ export class MembershipRequestService {
     try {
       await this.emails.sendDecisionEmail({
         to,
-        recipientName: person.fullName ?? 'Applicant',
         decision:
           decision === MembershipCommitteeDecision.APPROVED
             ? 'APPROVED'
@@ -642,7 +644,6 @@ export class MembershipRequestService {
   private async sendGlobalRoleDecisionEmail(
     request: {
       person?: {
-        fullName?: string;
         emailPersonal?: string | null;
         emailUniversity?: string | null;
       };
@@ -657,7 +658,6 @@ export class MembershipRequestService {
     try {
       await this.emails.sendDecisionEmail({
         to,
-        recipientName: person.fullName ?? 'Applicant',
         decision:
           decision === MembershipCommitteeDecision.APPROVED
             ? 'APPROVED'

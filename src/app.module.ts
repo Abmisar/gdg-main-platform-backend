@@ -1,8 +1,11 @@
+import { RightsController } from './data-rights/rights.controller.js';
+import { RightsService } from './data-rights/rights.service.js';
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
-import { APP_FILTER, APP_PIPE } from '@nestjs/core';
+import { APP_FILTER, APP_PIPE, APP_INTERCEPTOR } from '@nestjs/core';
 import { ScheduleModule } from '@nestjs/schedule';
 import { AppController } from './app.controller.js';
+import { ReadAuditInterceptor } from './prisma/read-audit.js';
 import { AppService } from './app.service.js';
 import { AuthModule } from './auth/auth.module.js';
 import { AnnouncementsModule } from './announcements/announcements.module.js';
@@ -14,11 +17,12 @@ import { HealthController } from './health/health.controller.js';
 import { MembershipRequestsModule } from './membership-requests/membership-requests.module.js';
 import { PrismaModule } from './prisma/prisma.module.js';
 import { RegistrationsModule } from './registrations/registrations.module.js';
+import { RetentionModule } from './retention/retention.module.js';
 
 @Module({
   imports: [
     ConfigModule.forRoot({ isGlobal: true }),
-    ScheduleModule.forRoot(),
+    ...(process.env.SCHEDULERS_ENABLED === 'false' ? [] : [ScheduleModule.forRoot()]),
     PrismaModule,
     AuthModule,
     AnnouncementsModule,
@@ -26,10 +30,13 @@ import { RegistrationsModule } from './registrations/registrations.module.js';
     RegistrationsModule,
     EventRegistrationsModule,
     MembershipRequestsModule,
+    RetentionModule,
   ],
-  controllers: [AppController, HealthController],
+  controllers: [RightsController, AppController, HealthController],
   providers: [
+    RightsService,
     AppService,
+    { provide: APP_INTERCEPTOR, useClass: ReadAuditInterceptor },
     { provide: APP_FILTER, useClass: HttpErrorFilter },
     { provide: APP_PIPE, useClass: ApiValidationPipe },
   ],

@@ -1,7 +1,10 @@
+import { RequiredSkills } from '../auth/signup-consent.dto.js';
+import { ConsentSubmission } from '../data-rights/consent.js';
 import {
   ArrayMinSize,
   ArrayUnique,
   IsArray,
+  IsDefined,
   IsEmail,
   IsIn,
   IsObject,
@@ -29,10 +32,10 @@ export class MembershipApplicationDataDto {
   @MaxLength(255)
   university: string;
 
-  @IsOptional()
+  @Matches(/\S/)
   @IsString()
   @MaxLength(100)
-  branch?: string;
+  branch: string;
 
   @IsString()
   @MaxLength(255)
@@ -49,9 +52,9 @@ export class MembershipApplicationDataDto {
   @IsIn(['female', 'male'])
   gender: string;
 
-  @IsOptional()
+  @RequiredSkills()
   @IsObject()
-  skillsByCommittee?: Record<string, string[]>;
+  skillsByCommittee: Record<string, string[]>;
 }
 
 export class MembershipCommitteeApplicationDto {
@@ -64,7 +67,9 @@ export class MembershipCommitteeApplicationDto {
   requestedRole: (typeof REQUESTED_ROLES)[number];
 }
 
-export class CreateMembershipRequestDto {
+export class CreateMembershipRequestDto extends ConsentSubmission {
+  @IsDefined()
+  @IsObject()
   @ValidateNested()
   @Type(() => MembershipApplicationDataDto)
   applicationData: MembershipApplicationDataDto;

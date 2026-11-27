@@ -1,5 +1,8 @@
+import { AuditRead } from '../prisma/read-audit.js';
+import { captureConsent } from '../data-rights/consent.js';
+import type { Request } from 'express';
 import {
-  Body,
+  Req, Body,
   Controller,
   ForbiddenException,
   Get,
@@ -44,6 +47,7 @@ export class MembershipRequestsController {
   ) {}
 
   @Get('leadership')
+  @AuditRead('applications.leadership', 'array')
   async listLeadership(
     @Query('scope') scope: string,
     @CurrentUser() user: AuthenticatedUser,
@@ -56,12 +60,14 @@ export class MembershipRequestsController {
   @UseGuards(VerifiedEmailGuard)
   async create(
     @CurrentUser() user: AuthenticatedUser,
+    @Req() request: Request,
     @Body() body: CreateMembershipRequestDto,
   ) {
-    return apiSuccess(await this.requests.create(user, body), 'Membership request submitted.');
+    return apiSuccess(await this.requests.create(user, body, captureConsent(body.consent, request, ['membership'])), 'Membership request submitted.');
   }
 
   @Get()
+  @AuditRead('applications.committee', 'array')
   async list(
     @Query() query: ListMembershipRequestsQueryDto,
     @CurrentUser() user: AuthenticatedUser,
@@ -70,6 +76,7 @@ export class MembershipRequestsController {
   }
 
   @Patch(':requestId/committees/:committeeCode')
+  @AuditRead('applications.decide-committee', 'single')
   async decide(
     @Param('requestId', ParseIntPipe) requestId: number,
     @Param() params: MembershipRequestCommitteeParamDto,
@@ -83,6 +90,7 @@ export class MembershipRequestsController {
   }
 
   @Patch(':requestId/leadership/committees/:committeeCode')
+  @AuditRead('applications.decide-leadership-committee', 'single')
   async decideLeadershipCommittee(
     @Param('requestId', ParseIntPipe) requestId: number,
     @Param() params: MembershipRequestCommitteeParamDto,
@@ -93,6 +101,7 @@ export class MembershipRequestsController {
   }
 
   @Patch(':requestId/leadership/global-roles/:roleCode')
+  @AuditRead('applications.decide-global-role', 'single')
   async decideGlobalRole(
     @Param('requestId', ParseIntPipe) requestId: number,
     @Param('roleCode') roleCode: string,

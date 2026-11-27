@@ -75,7 +75,9 @@ async function main() {
   const plan = planImport(JSON.parse(await readFile(file, 'utf8')));
   const { PrismaClient } = await import('../dist/generated/prisma/client.js');
   const { PrismaPg } = await import('@prisma/adapter-pg');
-  const prisma = new PrismaClient({ adapter: new PrismaPg({ connectionString: process.env.DATABASE_URL }) });
+  const { encryptedClient } = await import('../dist/field-encryption/encrypted-client.js');
+  const { FieldCipher } = await import('../dist/field-encryption/field-cipher.js');
+  const prisma = encryptedClient(new PrismaClient({ adapter: new PrismaPg({ connectionString: process.env.DATABASE_URL }) }), new FieldCipher(process.env));
   try { console.log(JSON.stringify(await importPlan(prisma, plan, args.includes('--apply')))); }
   finally { await prisma.$disconnect(); }
 }

@@ -230,3 +230,65 @@ Forward `Content-Length` to the backend on both multipart image POST routes. Set
 ### SMTP submission
 
 Configure `SMTP_HOST` with a DNS name matching the relay's trusted TLS certificate. Port 465 uses implicit TLS. Other configured ports require STARTTLS and a valid certificate before authentication and message submission.
+
+## Personal data encryption
+
+The API, workers, backfill job and auth import need the same three secrets. Generate each 32-byte key independently with `openssl rand -base64 32` in the deployment secret manager. Keep key material out of database dumps, build arguments, shell history and CI output.
+
+| Variable | Value |
+| --- | --- |
+| `FIELD_ENCRYPTION_KEYS` | JSON object mapping stable version names to standard base64 keys, for example `{"v1":"<base64>","v2":"<base64>"}` |
+| `FIELD_ENCRYPTION_ACTIVE_VERSION` | Version used for new writes, for example `v2` |
+| `FIELD_BLIND_INDEX_KEY` | Independent base64 HMAC key shared across encryption-key rotations |
+
+Each protected value has its own random 96-bit nonce, AES-256-GCM ciphertext and 128-bit tag. The f2 envelope authenticates its version, model, field and database primary key. The client reserves integer IDs from the owning sequence and allocates UUIDs before encryption. Projection queries fetch the ID for authentication and preserve the caller’s selection. Encrypted updates require one identified row; batch creation encrypts each row separately. An indexed column uses HMAC-SHA256 with a per-field key derived using HKDF-SHA256. Email matching trims whitespace and lowercases. Phone matching converts Arabic-Indic and Eastern Arabic-Indic digits to ASCII, removes separators and canonicalizes Saudi 05, +966 and 00966 forms. Opaque verification and rate-limit identifiers retain exact case. Blind indexes disclose equality within a field.
+
+### Field inventory
+
+| Model.field | Purpose | Lookup, search or sort |
+| --- | --- | --- |
+| ManualRightsRequest.contactEmail, details, resolution | Privacy request correspondence and case notes | Exact contact email via blind index; free text retrieved by request ID |
+| Person.fullName | Member directories and registration display | Substring search within the authorized event and directory sorting after decryption |
+| Person.emailPersonal, emailUniversity | Login linkage, communication and campus affiliation | Indexed exact match, unique personal address, event-scoped substring search |
+| Person.phoneNumber | Requested registrant contact and member directory | Indexed exact match |
+| Person.university, branch, major, gender | Profile and recruitment attributes | Read by person ID |
+| Person.bio, profileImageUrl, githubUrl, portfolioUrl, xUrl | Member-provided profile text, image and social links | Read by person ID |
+| SignupVerification.fullName, emailPersonal, emailUniversity | Staged identity before verification | Unique exact lookup for personal email |
+| SignupVerification.applicationData, PendingSignup.applicationData, MembershipRequest.applicationData, NonMemberRegistration.applicationData | Signup payload and membership application answers | Look up by identity, request ID or committee queue |
+| EmailVerificationChallenge.email, PersonEmailIdentity.email | Verification destination and linked address | Challenge by person/purpose, identity by person/kind and partial unique blind index for personal email |
+| RegistrationAnswer.answerText | Registrant answers | Look up by registration |
+| EventRegistration.excuseReason, RegistrationBlacklistEntry.resolutionReason | Staff attendance decisions | Look up by registration or entry |
+| MemberRole.notes, CommitteeTask.title, CommitteeTask.description, CommitteePointEntry.reason, GlobalPointEntry.reason | Internal notes, assignments and award explanations | Look up by member, committee or task |
+| AuthUser.name, email, image | Better Auth profile, address and avatar | Unique indexed email lookup |
+| AuthSession.ipAddress, userAgent | Session metadata | Read by session |
+| AuthAccount.accessToken, refreshToken, idToken | Provider tokens that may carry profile claims | Read by account identity |
+| AuthVerification.identifier, value | Verification and OAuth state | Exact-match indexes for consumption and revocation |
+| BetterAuthRateLimit.key | Rate-limit identity, potentially including an IP address | Unique exact match |
+| Event.name, description, location, requirements, speakers, mapsLink, whatsappGroupLink, imageUrl; EventQuestion.questionText, options; Announcement.title, excerpt, body, imageUrl, actionLabel, actionHref | Published or publishable content, including speaker names and links | Publication and event display. These editorial fields stay readable in PostgreSQL |
+| Membership and registration IDs, role codes, committee choices, timestamps, decisions, AuthAccount.accountId/providerId, password hash, AuthSession.token, wallet identifiers | Relationships, authorization, credentials and history | Database joins, constraints and protocol lookup. These remain under database role controls |
+
+### Deployment and migration order
+
+The production Supabase database is in Central EU (Frankfurt), region `eu-central-1`.
+
+1. Build the new backend and keep the old application serving during expansion. Use the migration connection to run `prisma migrate deploy`. Migration `20261127120000_field_encryption` adds nullable encrypted columns, indexes, verification tracking and the staff audit table. Confirm a restorable backup and protect legacy dumps, replicas and WAL according to their retention policy.
+2. Run `node scripts/backfill-fields.mjs backfill` from the built checkout with the three secrets and the migration URL. The job uses primary-key batches of 100 and a row lock while copying. A retry scans from the beginning, authenticates existing values and writes only changes. Earlier committed batches survive interruption.
+3. Stop old API instances, workers, seeders and imports. Run backfill again, then `node scripts/backfill-fields.mjs verify`. Verification checks every decrypted value, SQL null and index against the original under a shared lock. Any subsequent write to a protected table invalidates verification.
+4. Apply the deferred SQL file `prisma/deferred/20261127130000_drop_plaintext/migration.sql` once with `psql -X -v ON_ERROR_STOP=1 -f` using the migration connection. Its transaction requires the verification marker, locks the protected tables, rebuilds the nonunique staging indexes as unique under the write freeze, removes the legacy columns and restores required fields and attendance checks. Keep this file outside Prisma's automatic migration directory. Fresh installations also run backfill, verify and the deferred migration before their first startup. Plaintext SQL development fixtures belong before this cutover.
+5. On a dedicated database, have the database owner provision the three logins and table grants with `docs/sql/field-access.sql`. Set passwords through the secret manager or interactive psql password prompt. Use `gdg_app` for the API and workers, `gdg_migrate` for schema changes and `AUDIT_READER_DATABASE_URL` with `gdg_audit_reader` for the authorized leadership view. Review inherited and pre-existing grants when adapting this SQL to a hosted database. Explicitly grant only the required DML for future tables. Start the new backend after cutover. Rolling back to the old application after the drop requires a coordinated database restore.
+6. In the separate `fork/deploy/oracle-docker` kit, add placeholders for the three field variables, separate application and migration URLs, and mount secrets into the API and maintenance jobs. Package the built client, field modules, backfill script and deferred SQL in the maintenance image. Remove schema deployment from any API startup using the restricted role. Keep the migration login out of the runtime container.
+
+### Rotation and operational cost
+
+Distribute the new key version alongside the old one to every reader first. Once all readers have both keys, switch the active version on every writer. Run `node scripts/backfill-fields.mjs rotate` after cutover to re-encrypt existing values in batches. Rerun after all old writers have stopped. Remove retired keys from runtime only after a successful pass and retain the versions needed to restore historical backups. Replacing the blind-index key requires pausing all reads and writes and rebuilding every index with the rotation job before restarting with the new key.
+
+Exact matches use B-tree indexes. Event substring search decrypts candidate names and emails in batches of 256 and retains only the requested page of IDs, with work proportional to the number of registrations matching event and status. The club dashboard exposes up to 100 members and events per page with independent ID cursors. Directory sorting uses Node's locale comparison after decryption. Large event searches, directory collation and the verification maintenance window should be measured on representative synthetic volumes.
+
+The read audit records member ID, operation, event/committee scope when applicable, timestamp and returned record count. Authorized membership reviewers, directory readers, dashboard readers and report exports write the audit before the response is returned. Club leader and co-leader roles receive `audit.staff_reads.view` for `GET /club-leadership/read-audit`. Decision responses are audited, including failed handler attempts with zero disclosures. The application writer can append audit rows. The dedicated reader can select only the latest 200 rows through the view. Permission registries are read-only for the application. The migration role owns the table.
+
+Build the checkout and run `sh test/run-field-db.sh` for the isolated synthetic PostgreSQL suite. It uses the dedicated Colima profile `gdg-field-test`, checks host memory before startup and before the suite, and stops the test VM on exit.
+
+
+The Prisma extension rejects ordering, distinct selection, grouped metrics and aggregates over protected fields. Raw SQL bypasses all extension encryption and authorization. A source scan of `$queryRaw`, `$executeRaw` and their unsafe variants found the maintenance backfill intentionally handling protected columns. API SQL uses IDs for locks, membership and permission metadata, event seat state, rate-limit counters, dashboard numeric aggregates, sequence allocation and the restricted audit view. Rights ownership checks use exact, field-specific blind indexes for verified personal, university and manual-request emails. Export and erasure use the same ownership predicate inside their transactions.
+
+For local development, `./gdg backend run` provisions missing encryption and database secrets, stops the running backend, then starts Compose provisioning, migration, backfill, verification, deferred cutover and final grants in order. Repeated starts detect an already contracted schema. The API receives the writer and audit-reader URLs. The migration and bootstrap credentials stay in separate containers. For existing volumes, keep the existing bootstrap login and credentials. The grants script is repeatable after schema updates, including the rights and retention migrations.

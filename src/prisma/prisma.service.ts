@@ -9,6 +9,9 @@ import { ConfigService } from '@nestjs/config';
 import { PrismaPg } from '@prisma/adapter-pg';
 import { PrismaClient } from '../generated/prisma/client.js';
 
+import { encryptedClient } from '../field-encryption/encrypted-client.js';
+import { FieldCipher } from '../field-encryption/field-cipher.js';
+
 function safeErrorCode(error: unknown): string | undefined {
   if (typeof error !== 'object' || error === null || !('code' in error))
     return undefined;
@@ -46,6 +49,7 @@ export class PrismaService
         },
       ),
     });
+    return encryptedClient(this, new FieldCipher(process.env)) as unknown as PrismaService;
   }
 
   async onModuleInit() {

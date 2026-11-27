@@ -1,3 +1,4 @@
+import { AuditRead } from '../prisma/read-audit.js';
 import {
   Body,
   Controller,
@@ -62,6 +63,7 @@ export class RegistrationsController {
   }
 
   @Get('data/event-reports/events/:eventId')
+  @AuditRead('registrants.export', 'items')
   async getDataEventReport(
     @Param('eventId', ParseIntPipe) eventId: number,
     @Query() query: DataEventReportQueryDto,
@@ -77,6 +79,7 @@ export class RegistrationsController {
   }
 
   @Get('events/:eventId/registrations')
+  @AuditRead('registrants.list', 'items')
   async list(
     @Param('eventId', ParseIntPipe) eventId: number,
     @Query() query: ListRegistrationsQueryDto,
@@ -96,6 +99,7 @@ export class RegistrationsController {
   }
 
   @Get('registrations/blacklist')
+  @AuditRead('blacklist.list', 'items')
   async listBlacklist(
     @Query() query: ListRegistrationsQueryDto,
     @CurrentUser() user: AuthenticatedUser,

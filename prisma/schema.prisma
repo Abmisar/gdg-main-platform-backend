@@ -93,25 +93,33 @@ enum AnnouncementStatus {
 model Person {
   personId        Int      @id @default(autoincrement()) @map("person_id")
   authUserId      String?  @unique @map("auth_user_id") @db.Uuid
-  fullName        String   @map("full_name") @db.VarChar(255)
-  emailUniversity String?  @map("email_university") @db.VarChar(255)
-  emailPersonal   String?  @map("email_personal") @db.VarChar(255)
+  fullName String @map("full_name_encrypted") @db.Text
+  emailUniversity String? @map("email_university_encrypted") @db.Text
+  emailUniversityIndex String? @map("email_university_idx") @db.Char(64)
+  emailPersonal String? @map("email_personal_encrypted") @db.Text
+  emailPersonalIndex String? @map("email_personal_idx") @db.Char(64) @unique
   emailPersonalVerifiedAt DateTime? @map("email_personal_verified_at") @db.Timestamptz(6)
   emailUniversityVerifiedAt DateTime? @map("email_university_verified_at") @db.Timestamptz(6)
-  phoneNumber     String?  @map("phone_number") @db.VarChar(50)
-  university      String?  @db.VarChar(255)
-  branch          String?  @db.VarChar(100)
-  major           String?  @db.VarChar(255)
-  gender          String?  @db.VarChar(20)
-  profileImageUrl String?  @map("profile_image_url") @db.Text
-  bio             String?  @db.VarChar(1000)
-  githubUrl       String?  @map("github_url") @db.VarChar(2048)
-  portfolioUrl    String?  @map("portfolio_url") @db.VarChar(2048)
-  xUrl            String?  @map("x_url") @db.VarChar(2048)
+  phoneNumber String? @map("phone_number_encrypted") @db.Text
+  phoneNumberIndex String? @map("phone_number_idx") @db.Char(64)
+  university String? @map("university_encrypted") @db.Text
+  branch String? @map("branch_encrypted") @db.Text
+  major String? @map("major_encrypted") @db.Text
+  gender String? @map("gender_encrypted") @db.Text
+  profileImageUrl String? @map("profile_image_url_encrypted") @db.Text
+  bio String? @map("bio_encrypted") @db.Text
+  githubUrl String? @map("github_url_encrypted") @db.Text
+  portfolioUrl String? @map("portfolio_url_encrypted") @db.Text
+  xUrl String? @map("x_url_encrypted") @db.Text
   isActive        Boolean  @default(true) @map("is_active")
   createdAt       DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt       DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
 
+  consents ConsentRecord[]
+  rightsAudit RightsAudit[]
+  deletion AccountDeletion?
+  subjectRequests ManualRightsRequest[] @relation("RequestSubject")
+  handledRequests ManualRightsRequest[] @relation("RequestHandler")
   member        Member?
   registrations EventRegistration[] @relation("RegistrationOwner")
   membershipRequest MembershipRequest?
@@ -120,6 +128,8 @@ model Person {
   pendingSignup PendingSignup?
   emailIdentities PersonEmailIdentity[]
 
+  @@index([emailUniversityIndex])
+  @@index([phoneNumberIndex])
   @@map("person")
 }
 
@@ -224,7 +234,7 @@ model MemberRole {
   startsOn   DateTime? @map("starts_on") @db.Date
   endsOn     DateTime? @map("ends_on") @db.Date
   assignedBy Int?      @map("assigned_by")
-  notes      String?   @db.VarChar(500)
+  notes String? @map("notes_encrypted") @db.Text
   createdAt  DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
 
   member   Member  @relation("MemberRoleRecipient", fields: [memberId], references: [memberId], onDelete: Restrict, onUpdate: NoAction)
@@ -233,6 +243,7 @@ model MemberRole {
 
   // SQL migration enforces date order and partial indexes WHERE ends_on IS NULL.
   // A full Prisma @@unique would incorrectly reject repeated ended assignments.
+
   @@map("member_role")
 }
 
@@ -321,7 +332,7 @@ model MembershipRequest {
   membershipRequestId Int                     @id @default(autoincrement()) @map("membership_request_id")
   personId            Int                     @unique @map("person_id")
   status              MembershipRequestStatus @default(PENDING)
-  applicationData     Json                    @map("application_data") @db.JsonB
+  applicationData Json @map("application_data_encrypted") @db.JsonB
   createdAt           DateTime                @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt           DateTime                @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
 
@@ -381,11 +392,11 @@ model Announcement {
   actionHref          String?              @map("action_href") @db.VarChar(2048)
   pinned              Boolean              @default(false)
   publishedAt         DateTime             @default(now()) @map("published_at") @db.Timestamptz(6)
-  publishedByMemberId Int                  @map("published_by_member_id")
+  publishedByMemberId Int?                 @map("published_by_member_id")
   createdAt           DateTime             @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt           DateTime             @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
 
-  publisher Member @relation(fields: [publishedByMemberId], references: [memberId], onDelete: Restrict, onUpdate: NoAction)
+  publisher Member? @relation(fields: [publishedByMemberId], references: [memberId], onDelete: Restrict, onUpdate: NoAction)
 
   @@index([pinned, publishedAt])
   @@map("announcement")
@@ -394,7 +405,7 @@ model Announcement {
 model NonMemberRegistration {
   nonMemberRegistrationId Int      @id @default(autoincrement()) @map("non_member_registration_id")
   personId                Int      @unique @map("person_id")
-  applicationData         Json     @map("application_data") @db.JsonB
+  applicationData Json @map("application_data_encrypted") @db.JsonB
   createdAt               DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
 
   person Person @relation(fields: [personId], references: [personId], onDelete: Restrict, onUpdate: NoAction)
@@ -406,7 +417,7 @@ model EmailVerificationChallenge {
   emailVerificationChallengeId Int       @id @default(autoincrement()) @map("email_verification_challenge_id")
   personId                     Int       @map("person_id")
   purpose                      String    @db.VarChar(32)
-  email                        String    @db.VarChar(255)
+  email String @map("email_encrypted") @db.Text
   codeHash                     String    @map("code_hash") @db.VarChar(64)
   sentAt                       DateTime  @default(now()) @map("sent_at") @db.Timestamptz(6)
   expiresAt                    DateTime  @map("expires_at") @db.Timestamptz(6)
@@ -424,7 +435,7 @@ model PendingSignup {
   pendingSignupId Int      @id @default(autoincrement()) @map("pending_signup_id")
   personId        Int      @unique @map("person_id")
   registrationType String  @map("registration_type") @db.VarChar(20)
-  applicationData Json     @map("application_data") @db.JsonB
+  applicationData Json @map("application_data_encrypted") @db.JsonB
   committees      Json     @default("[]") @db.JsonB
   globalRoles     Json     @default("[]") @map("global_roles") @db.JsonB
   expiresAt       DateTime @map("expires_at") @db.Timestamptz(6)
@@ -440,13 +451,15 @@ model PendingSignup {
 // There is deliberately no Person relation so unverified signups cannot
 // appear as accounts in the application database.
 model SignupVerification {
+  consentEvidence Json? @map("consent_evidence")
   signupVerificationId Int       @id @default(autoincrement()) @map("signup_verification_id")
   authUserId            String    @unique @map("auth_user_id") @db.Uuid
-  fullName              String    @map("full_name") @db.VarChar(255)
-  emailPersonal         String    @unique @map("email_personal") @db.VarChar(255)
-  emailUniversity       String?   @map("email_university") @db.VarChar(255)
+  fullName String @map("full_name_encrypted") @db.Text
+  emailPersonal String @map("email_personal_encrypted") @db.Text @unique
+  emailPersonalIndex String? @map("email_personal_idx") @db.Char(64) @unique
+  emailUniversity String? @map("email_university_encrypted") @db.Text
   registrationType      String    @map("registration_type") @db.VarChar(20)
-  applicationData       Json      @map("application_data") @db.JsonB
+  applicationData Json @map("application_data_encrypted") @db.JsonB
   committees            Json      @default("[]") @db.JsonB
   globalRoles           Json      @default("[]") @map("global_roles") @db.JsonB
   codeHash              String?   @map("code_hash") @db.VarChar(64)
@@ -483,23 +496,25 @@ model AuthRateLimitBucket {
 model PersonEmailIdentity {
   personEmailIdentityId Int      @id @default(autoincrement()) @map("person_email_identity_id")
   personId              Int      @map("person_id")
-  email                 String   @db.VarChar(255)
+  email String @map("email_encrypted") @db.Text
+  emailIndex String? @map("email_idx") @db.Char(64)
   kind                  String   @db.VarChar(20)
   createdAt             DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
 
   person Person @relation(fields: [personId], references: [personId], onDelete: Cascade, onUpdate: NoAction)
 
   @@unique([personId, kind])
+  @@index([emailIndex])
   @@map("person_email_identity")
 }
 
 model CommitteeTask {
   taskId            Int      @id @default(autoincrement()) @map("task_id")
   committeeId       Int      @map("committee_id")
-  title             String   @db.VarChar(150)
-  description       String   @default("") @db.Text
+  title String @map("title_encrypted") @db.Text
+  description String @map("description_encrypted") @db.Text
   assignedMemberId  Int      @map("assigned_member_id")
-  createdByMemberId Int      @map("created_by_member_id")
+  createdByMemberId Int?     @map("created_by_member_id")
   dueAt             DateTime @map("due_at") @db.Timestamptz(3)
   priority          String   @default("MEDIUM") @db.VarChar(10)
   status            String   @default("TODO") @db.VarChar(20)
@@ -510,7 +525,7 @@ model CommitteeTask {
 
   committee Committee @relation(fields: [committeeId], references: [committeeId], onDelete: Restrict, onUpdate: NoAction)
   assignee  Member    @relation("TaskAssignee", fields: [assignedMemberId], references: [memberId], onDelete: Restrict, onUpdate: NoAction)
-  creator   Member    @relation("TaskCreator", fields: [createdByMemberId], references: [memberId], onDelete: Restrict, onUpdate: NoAction)
+  creator   Member?   @relation("TaskCreator", fields: [createdByMemberId], references: [memberId], onDelete: Restrict, onUpdate: NoAction)
   event     Event?    @relation(fields: [eventId], references: [eventId], onDelete: Restrict, onUpdate: NoAction)
 
   @@index([committeeId, status, dueAt])
@@ -526,7 +541,7 @@ model CommitteePointEntry {
   memberId          Int      @map("member_id")
   awardedByMemberId Int?     @map("awarded_by_member_id")
   pointsDelta       Int      @map("points_delta")
-  reason            String   @db.VarChar(500)
+  reason String @map("reason_encrypted") @db.Text
   createdAt         DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
 
   recipient MemberCommittee @relation("PointsRecipient", fields: [memberId, committeeId], references: [memberId, committeeId], onDelete: Restrict, onUpdate: NoAction)
@@ -542,7 +557,7 @@ model GlobalPointEntry {
   memberId          Int      @map("member_id")
   awardedByMemberId Int?     @map("awarded_by_member_id")
   pointsDelta       Int      @map("points_delta")
-  reason            String   @db.VarChar(500)
+  reason String @map("reason_encrypted") @db.Text
   createdAt         DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
 
   recipient Member @relation("GlobalPointsRecipient", fields: [memberId], references: [memberId], onDelete: Restrict, onUpdate: NoAction)
@@ -581,6 +596,7 @@ model Event {
   questions     EventQuestion[]
   registrations EventRegistration[]
   tasks         CommitteeTask[]
+  retentionAggregate EventRetentionAggregate?
 
   @@index([status, startsAt, eventId])
   @@index([status, endsAt, eventId])
@@ -620,7 +636,7 @@ model EventRegistration {
   cancelledAt              DateTime?          @map("cancelled_at") @db.Timestamptz(3)
   excusedAt                DateTime?          @map("excused_at") @db.Timestamptz(3)
   excusedByMemberId        Int?               @map("excused_by_member_id")
-  excuseReason             String?            @map("excuse_reason") @db.Text
+  excuseReason String? @map("excuse_reason_encrypted") @db.Text
   attendanceMethod         AttendanceMethod?  @map("attendance_method")
   attendanceTokenHash      String?            @unique @map("attendance_token_hash") @db.Text
   attendanceTokenEncrypted String?            @map("attendance_token_encrypted") @db.Text
@@ -668,6 +684,7 @@ model RegistrationEmailDelivery {
   registrationId Int                   @map("registration_id")
   kind           RegistrationEmailKind
   state          RegistrationEmailState @default(PENDING)
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
   leaseExpiresAt DateTime?              @map("lease_expires_at") @db.Timestamptz(3)
 
   registration EventRegistration @relation(fields: [registrationId], references: [registrationId], onDelete: Cascade)
@@ -682,7 +699,7 @@ model RegistrationAnswer {
   registrationId Int    @map("registration_id")
   questionId     Int    @map("question_id")
   eventId        Int    @map("event_id")
-  answerText     String @map("answer_text") @db.Text
+  answerText String @map("answer_text_encrypted") @db.Text
 
   // Both foreign keys share eventId to prevent answers to another event's questions.
   registration EventRegistration @relation(fields: [registrationId, eventId], references: [registrationId, eventId], onDelete: Cascade, onUpdate: Restrict)
@@ -700,7 +717,7 @@ model RegistrationBlacklistEntry {
   createdAt          DateTime        @default(now()) @map("created_at") @db.Timestamptz(3)
   resolvedAt         DateTime?       @map("resolved_at") @db.Timestamptz(3)
   resolvedByMemberId Int?            @map("resolved_by_member_id")
-  resolutionReason   String?         @map("resolution_reason") @db.Text
+  resolutionReason String? @map("resolution_reason_encrypted") @db.Text
 
   registration EventRegistration @relation(fields: [registrationId], references: [registrationId], onDelete: Restrict, onUpdate: Restrict)
   resolver     Member?           @relation("BlacklistResolver", fields: [resolvedByMemberId], references: [memberId], onDelete: Restrict, onUpdate: NoAction)
@@ -713,12 +730,14 @@ model RegistrationBlacklistEntry {
 // Better Auth owns credentials; Person remains the application/permission identity.
 model AuthUser {
   id            String    @id @db.Uuid
-  name          String
-  email         String    @unique
+  name String @map("name_encrypted") @db.Text
+  email String @map("email_encrypted") @db.Text @unique
+  emailIndex String? @map("email_idx") @db.Char(64) @unique
   emailVerified Boolean   @default(false)
-  image         String?
+  image String? @map("image_encrypted") @db.Text
   locale        String    @default("en")
   welcomeSentAt DateTime?
+  lastSignInAt  DateTime? @map("last_sign_in_at") @db.Timestamptz(3)
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
   sessions      AuthSession[]
@@ -733,8 +752,8 @@ model AuthSession {
   expiresAt DateTime
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
-  ipAddress String?
-  userAgent String?
+  ipAddress String? @map("ipAddress_encrypted") @db.Text
+  userAgent String? @map("userAgent_encrypted") @db.Text
   userId    String   @db.Uuid
   user      AuthUser @relation(fields: [userId], references: [id], onDelete: Cascade)
 
@@ -748,9 +767,9 @@ model AuthAccount {
   providerId            String
   userId                String    @db.Uuid
   user                  AuthUser  @relation(fields: [userId], references: [id], onDelete: Cascade)
-  accessToken           String?
-  refreshToken          String?
-  idToken               String?
+  accessToken String? @map("accessToken_encrypted")
+  refreshToken String? @map("refreshToken_encrypted")
+  idToken String? @map("idToken_encrypted")
   accessTokenExpiresAt  DateTime?
   refreshTokenExpiresAt DateTime?
   scope                 String?
@@ -765,21 +784,113 @@ model AuthAccount {
 
 model AuthVerification {
   id         String   @id @db.Uuid
-  identifier String
-  value      String
+  identifier String @map("identifier_encrypted")
+  identifierIndex String? @map("identifier_idx") @db.Char(64)
+  value String @map("value_encrypted")
+  valueIndex String? @map("value_idx") @db.Char(64)
   expiresAt  DateTime
   createdAt  DateTime @default(now())
   updatedAt  DateTime @updatedAt
 
-  @@index([identifier])
+  @@index([identifierIndex])
+  @@index([valueIndex])
   @@map("auth_verification")
 }
 
 model BetterAuthRateLimit {
   id          String @id @db.Uuid
-  key         String @unique
+  key String @map("key_encrypted") @unique
+  keyIndex String? @map("key_idx") @db.Char(64) @unique
   count       Int
   lastRequest BigInt
 
   @@map("better_auth_rate_limit")
+}
+
+model StaffReadAudit {
+  id Int @id @default(autoincrement())
+  status String
+  actorMemberId Int @map("actor_member_id")
+  action String
+  scope String?
+  count Int
+  readAt DateTime @default(now()) @map("read_at") @db.Timestamptz(6)
+  @@map("staff_read_audit")
+}
+
+model ConsentRecord {
+  id Int @id @default(autoincrement())
+  personId Int @map("person_id")
+  person Person @relation(fields: [personId], references: [personId], onDelete: Cascade)
+  document String
+  version String
+  locale String
+  purpose String
+  acceptedAt DateTime @map("accepted_at") @db.Timestamptz(3)
+  ipHash String @map("ip_hash")
+  userAgentHash String @map("user_agent_hash")
+  @@index([personId])
+  @@map("consent_record")
+}
+
+model RightsAudit {
+  id Int @id @default(autoincrement())
+  personId Int @map("person_id")
+  person Person @relation(fields: [personId], references: [personId], onDelete: Cascade)
+  action String
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  @@index([personId])
+  @@map("rights_audit")
+}
+
+model AccountDeletion {
+  personId Int @id @map("person_id")
+  person Person @relation(fields: [personId], references: [personId], onDelete: Cascade)
+  dueAt DateTime @map("due_at") @db.Timestamptz(3)
+  @@index([dueAt])
+  @@map("account_deletion")
+}
+
+model DeletionTombstone {
+  id Int @id @default(autoincrement())
+  completedAt DateTime @default(now()) @map("completed_at") @db.Timestamptz(3)
+  @@map("deletion_tombstone")
+}
+
+model ManualRightsRequest {
+  id Int @id @default(autoincrement())
+  personId Int? @map("person_id")
+  person Person? @relation("RequestSubject", fields: [personId], references: [personId], onDelete: Cascade)
+  contactEmail String? @map("contact_email_encrypted")
+  contactEmailIndex String? @map("contact_email_idx") @db.Char(64)
+  kind String
+  receivedAt DateTime @map("received_at") @db.Timestamptz(3)
+  dueAt DateTime @map("due_at") @db.Timestamptz(3)
+  status String @default("OPEN")
+  handlerId Int? @map("handler_id")
+  handler Person? @relation("RequestHandler", fields: [handlerId], references: [personId], onDelete: SetNull)
+  details String? @map("details_encrypted")
+  resolution String? @map("resolution_encrypted")
+  @@index([contactEmailIndex])
+  @@index([status,dueAt])
+  @@index([personId])
+  @@map("manual_rights_request")
+}
+
+model WalletGuestWithdrawal {
+  registrationId Int @id @map("registration_id")
+  committeeCode String @map("committee_code")
+  revision Int
+  @@map("wallet_guest_withdrawal")
+}
+
+model EventRetentionAggregate {
+  eventId         Int      @id @map("event_id")
+  registeredCount Int      @map("registered_count")
+  attendedCount   Int      @map("attended_count")
+  computedAt      DateTime @map("computed_at") @db.Timestamptz(3)
+
+  event Event @relation(fields: [eventId], references: [eventId], onDelete: Cascade)
+
+  @@map("event_retention_aggregate")
 }

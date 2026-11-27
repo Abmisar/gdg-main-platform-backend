@@ -1,3 +1,4 @@
+import type { ConsentEvidence } from '../data-rights/consent.js';
 import { randomUUID } from 'node:crypto';
 import type { RequestSetupLinkDto } from './setup-password.dto.js';
 import { BadRequestException, ConflictException, Inject, Injectable, Logger, UnauthorizedException } from '@nestjs/common';
@@ -68,12 +69,12 @@ export class AuthService {
       redirectTo: new URL(`/${locale}/reset-password`, process.env.FRONTEND_URL ?? 'http://localhost:3000').href } });
   }
 
-  async signup(input: SignupDto) {
+  async signup(input: SignupDto, evidence: ConsentEvidence) {
     const { fullName, email, universityEmail, password, registrationType, committees = [], requestedGlobalRoles = [], locale = 'en' } = input;
     const applicationData = normalizeBranch(input.applicationData);
     assertExternalUniversityBranch(registrationType, applicationData.university, applicationData.branch);
     const normalizedEmail = email.trim().toLowerCase();
-    if (universityEmail?.trim().toLowerCase() === normalizedEmail) throw new BadRequestException('Personal and university emails must be different.', { errorCode: 'EMAILS_MUST_DIFFER' });
+    if (universityEmail?.trim().toLowerCase() === normalizedEmail) throw new BadRequestException('The second email must differ from the sign-in email.', { errorCode: 'EMAILS_MUST_DIFFER' });
     if (registrationType === 'MEMBER' && !committees.length && !requestedGlobalRoles.length) throw new BadRequestException('Select at least one committee or leadership role.');
     if (!(await findApplicableCommittees(this.prisma, committees.map(item => item.committeeCode)))) throw committeeUnavailable();
     const name = fullName.trim();
@@ -107,7 +108,7 @@ export class AuthService {
         data: { id: randomUUID(), userId: authUserId, providerId: 'credential', accountId: authUserId, password: passwordHash },
       });
       await tx.signupVerification.create({ data: {
-        authUserId, fullName: name, emailPersonal: normalizedEmail,
+        consentEvidence: evidence, authUserId, fullName: name, emailPersonal: normalizedEmail,
         emailUniversity: universityEmail?.trim().toLowerCase() ?? null, registrationType,
         applicationData: JSON.parse(JSON.stringify(applicationData)), committees: JSON.parse(JSON.stringify(committees)),
         globalRoles: JSON.parse(JSON.stringify(requestedGlobalRoles)), expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000),
@@ -151,7 +152,7 @@ export class AuthService {
     if (person?.pendingSignup) await this.finalizePendingSignup(person.personId);
   }
 
-  async completeGoogleSignup(identity: { id: string; email: string; emailVerified: boolean }, input: GoogleSignupCompletionDto) {
+  async completeGoogleSignup(identity: { id: string; email: string; emailVerified: boolean }, input: GoogleSignupCompletionDto, evidence: ConsentEvidence) {
     if (!identity.emailVerified) throw new UnauthorizedException();
     const email = identity.email.trim().toLowerCase();
     const verifiedAt = new Date();
@@ -160,6 +161,9 @@ export class AuthService {
       select: { personId: true, pendingSignup: true },
     });
     if (existingByAuthId) {
+      await this.prisma.consentRecord.createMany({ data: evidence.filter(row => ['signup', 'age_18_or_older'].includes(row.purpose)).map(row => ({
+        ...row, purpose: row.purpose === 'signup' ? 'renewal' : row.purpose, personId: existingByAuthId.personId,
+      })) });
       if (existingByAuthId.pendingSignup) await this.finalizePendingSignup(existingByAuthId.personId);
       return { registrationPendingApproval: input.registrationType === 'MEMBER' };
     }
@@ -173,7 +177,7 @@ export class AuthService {
 
     const universityEmail = input.applicationData.universityEmail?.trim().toLowerCase() ?? null;
     if (universityEmail === email) {
-      throw new BadRequestException('Personal and university emails must be different.', {
+      throw new BadRequestException('The second email must differ from the sign-in email.', {
         errorCode: 'EMAILS_MUST_DIFFER',
       });
     }
@@ -199,6 +203,7 @@ export class AuthService {
       const personId = await this.prisma.$transaction(async (tx) => {
         const person = await tx.person.create({
           data: {
+            consents: { create: evidence },
             authUserId: identity.id,
             fullName: input.fullName.trim(),
             emailPersonal: email,
@@ -242,6 +247,7 @@ export class AuthService {
 
       const person = await tx.person.create({
         data: {
+          consents: { create: (pending.consentEvidence ?? []) as ConsentEvidence },
           authUserId: pending.authUserId,
           fullName: pending.fullName,
           emailPersonal: pending.emailPersonal,
@@ -313,7 +319,7 @@ export class AuthService {
   async updateBio(user: RequestUser, bio: string) {
     const person = await this.prisma.person.update({
       where: { personId: user.personId },
-      data: { bio: bio.trim() || null },
+      data: { bio: bio.trim() || null, rightsAudit: { create: { action: 'bio_corrected' } } },
       select: { bio: true },
     });
     return { bio: person.bio };
@@ -327,7 +333,7 @@ export class AuthService {
     };
     const person = await this.prisma.person.update({
       where: { personId: user.personId },
-      data,
+      data: { ...data, rightsAudit: { create: { action: 'social_links_corrected' } } },
       select: { githubUrl: true, portfolioUrl: true, xUrl: true },
     });
     return {

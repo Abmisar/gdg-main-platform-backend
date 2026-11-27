@@ -37,6 +37,7 @@ export class GuestWalletRelayService {
     const scope = guestWalletRelayScope(this.config);
     if (!scope) return;
     try {
+      await this.sendWithdrawals(scope);
       let after = 0;
       for (;;) {
         const items = await this.prisma.eventRegistration.findMany({
@@ -75,6 +76,32 @@ export class GuestWalletRelayService {
       }
     } catch {
       this.logger.warn('Guest pass queue will retry');
+    }
+  }
+
+  private async sendWithdrawals(scope: Scope) {
+    let after = 0;
+    for (;;) {
+      const page = await this.prisma.walletGuestWithdrawal.findMany({
+        where: { registrationId: { gt: after }, committeeCode: { in: scope.committeeCodes } },
+        orderBy: { registrationId: 'asc' }, take: 50,
+      });
+      for (const { registrationId, committeeCode, revision } of page) {
+        after = registrationId;
+        try {
+          const response = await fetch(new URL(`/integrations/v1/guest-tickets/${committeeCode}/${registrationId}`, scope.origin), {
+            method: 'PUT', headers: { Authorization: `Bearer ${scope.token}`, 'Content-Type': 'application/json' },
+            body: JSON.stringify({ active: false, expired: false, revision }),
+            redirect: 'error', signal: AbortSignal.timeout(5000),
+          });
+          if (response.ok && (await response.json()).revision === revision) {
+            await this.prisma.walletGuestWithdrawal.deleteMany({ where: { registrationId, revision } });
+          }
+        } catch {
+          this.logger.warn('Guest pass withdrawal will retry');
+        }
+      }
+      if (page.length < 50) return;
     }
   }
 

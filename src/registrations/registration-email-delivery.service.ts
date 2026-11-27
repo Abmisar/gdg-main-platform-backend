@@ -125,7 +125,6 @@ export class RegistrationEmailDeliveryService {
               },
               person: {
                 select: {
-                  fullName: true,
                   emailPersonal: true,
                   emailUniversity: true,
                   isActive: true,
@@ -170,7 +169,6 @@ export class RegistrationEmailDeliveryService {
       kind,
       registrationId: registration.registrationId,
       to,
-      recipientName: person.fullName,
       eventName: event.name,
       eventType: event.eventType,
       eventStartsAt: event.startsAt,

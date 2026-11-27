@@ -51,8 +51,8 @@ function setup() {
       updateMany: vi.fn().mockResolvedValue({ count: 1 }),
       deleteMany: vi.fn().mockResolvedValue({ count: 1 }),
     },
-    announcement: { deleteMany: vi.fn().mockResolvedValue({ count: 1 }) },
-    committeeTask: { deleteMany: vi.fn().mockResolvedValue({ count: 1 }) },
+    announcement: { updateMany: vi.fn().mockResolvedValue({ count: 1 }) },
+    committeeTask: { updateMany: vi.fn(), deleteMany: vi.fn().mockResolvedValue({ count: 1 }) },
     walletBarcodeAlias: { deleteMany: vi.fn().mockResolvedValue({ count: 1 }) },
     walletMembershipLink: { deleteMany: vi.fn().mockResolvedValue({ count: 1 }) },
     memberSkill: { deleteMany: vi.fn().mockResolvedValue({ count: 1 }) },
@@ -86,7 +86,6 @@ describe('direct member assignment notifications', () => {
     await service.addMember(actor, 'PR', { email: person.emailPersonal! });
     await vi.waitFor(() => expect(emailService.sendDecisionEmail).toHaveBeenCalledWith({
       to: person.emailPersonal,
-      recipientName: person.fullName,
       decision: 'APPROVED',
       committeeName: 'Public Relations',
       roleName: 'Member',
@@ -104,7 +103,6 @@ describe('direct member assignment notifications', () => {
     });
     await vi.waitFor(() => expect(emailService.sendDecisionEmail).toHaveBeenCalledWith({
       to: person.emailPersonal,
-      recipientName: person.fullName,
       decision: 'APPROVED',
       committeeName: 'Public Relations',
       roleName: 'Co-Leader',
@@ -127,7 +125,6 @@ describe('direct member assignment notifications', () => {
     });
     await vi.waitFor(() => expect(emailService.sendDecisionEmail).toHaveBeenCalledWith({
       to: person.emailPersonal,
-      recipientName: person.fullName,
       decision: 'APPROVED',
       committeeName: 'Data Analysis',
       roleName: 'Leader',
@@ -150,9 +147,10 @@ describe('club member removal', () => {
     for (const delegate of [tx.committeePointEntry, tx.globalPointEntry, tx.memberSkill, tx.memberCommittee, tx.memberRole]) {
       expect(delegate.deleteMany).toHaveBeenCalledExactlyOnceWith({ where: { memberId: 70 } });
     }
-    expect(tx.announcement.deleteMany).toHaveBeenCalledExactlyOnceWith({ where: { publishedByMemberId: 70 } });
+    expect(tx.announcement.updateMany).toHaveBeenCalledExactlyOnceWith({ where: { publishedByMemberId: 70 }, data: { publishedByMemberId: null } });
+    expect(tx.committeeTask.updateMany).toHaveBeenCalledWith({ where: { createdByMemberId: 70 }, data: { createdByMemberId: null } });
     expect(tx.committeeTask.deleteMany).toHaveBeenCalledExactlyOnceWith({
-      where: { OR: [{ assignedMemberId: 70 }, { createdByMemberId: 70 }] },
+      where: { assignedMemberId: 70 },
     });
     expect(tx.walletBarcodeAlias.deleteMany).toHaveBeenCalledExactlyOnceWith({ where: { link: { memberId: 70 } } });
     expect(tx.walletMembershipLink.deleteMany).toHaveBeenCalledExactlyOnceWith({ where: { memberId: 70 } });
@@ -227,10 +225,7 @@ describe('club member removal', () => {
 
   it('does not remove the last active group leader', async () => {
     const { service, tx } = setup();
-    tx.person.findMany.mockResolvedValue([{
-      ...person,
-      member: { memberId: 70, isActive: true, roleAssignments: [{ roleCode: 'GROUP_LEADER' }] },
-    }]);
+    tx.$queryRaw.mockResolvedValue([{ member_id: 70 }]);
     await expect(service.removeClubPerson(actor, { email: person.emailPersonal! })).rejects.toBeInstanceOf(ConflictException);
     expect(tx.member.delete).not.toHaveBeenCalled();
     expect(tx.$executeRaw).not.toHaveBeenCalled();

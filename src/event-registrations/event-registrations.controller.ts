@@ -1,5 +1,7 @@
+import { captureConsent } from '../data-rights/consent.js';
+import type { Request } from 'express';
 import {
-  Body,
+  Req, Body,
   Controller,
   Get,
   HttpCode,
@@ -45,6 +47,7 @@ export class EventRegistrationsController {
   @UseGuards(AuthRequiredGuard)
   async register(
     @Param('eventId', ParseIntPipe) eventId: number,
+    @Req() request: Request,
     @Body() body: RegisterForEventDto,
     @CurrentUser() user: AuthenticatedUser,
   ) {
@@ -54,6 +57,7 @@ export class EventRegistrationsController {
         user.personId,
         body.discoverySource,
         body.answers ?? [],
+        captureConsent(body.consent, request, ['event']),
       ),
       'Registered.',
     );

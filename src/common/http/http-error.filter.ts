@@ -23,6 +23,7 @@ const ERROR_CATALOG: Partial<Record<number, readonly [string, string]>> = {
 // status. Only these pass through, together with their exception message.
 const DOMAIN_ERROR_CODES: ReadonlyMap<string, number> = new Map([
   ['CAPACITY_REACHED', 409],
+  ['WAITLIST_ORDER_IMMUTABLE', 409],
   ['INVALID_STATUS_TRANSITION', 409],
   ['REGISTRATION_NOT_FOUND', 404],
   ['EVENT_NOT_FOUND', 404],

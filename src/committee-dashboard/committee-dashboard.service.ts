@@ -1,3 +1,6 @@
+import { LeadershipAuditReader } from '../prisma/leadership-audit-reader.js';
+import { directoryOrder } from './directory-order.js';
+import { removeMember } from './remove-member.js';
 import { randomUUID } from 'node:crypto';
 import {
   ForbiddenException,
@@ -57,6 +60,7 @@ export class CommitteeDashboardService {
     @Optional() private readonly eventImageStorage?: CommitteeEventImageStorageService,
     @Inject(MembershipRequestEmailService)
     @Optional() private readonly membershipEmails?: MembershipRequestEmailService,
+    @Inject(LeadershipAuditReader) private readonly auditReader?: LeadershipAuditReader,
   ) {}
 
   async getDeveloperOverview(user: RequestUser | undefined) {
@@ -99,7 +103,7 @@ export class CommitteeDashboardService {
           member: { isActive: true, person: { isActive: true } },
         },
         include: { member: { include: { person: { select: { fullName: true, emailPersonal: true } } } }, committee: { select: { committeeCode: true, committeeName: true } } },
-        orderBy: [{ role: 'asc' }, { member: { person: { fullName: 'asc' } } }],
+        orderBy: { role: 'asc' },
       }),
       (this.prisma.committeePointEntry as any).groupBy({
         by: ['memberId', 'committeeId'],
@@ -120,6 +124,7 @@ export class CommitteeDashboardService {
         take: 500,
       }),
     ]);
+    committeeLeaders.sort(directoryOrder);
     const leaderPoints = new Map((leaderPointTotals as any[]).map((row: any) => [`${row.memberId}:${row.committeeId}`, row._sum.pointsDelta ?? 0]));
     const leaderMemberships = new Set((committeeLeaders as any[]).map((row: any) => `${row.memberId}:${row.committeeId}`));
     const activeTasks = await Promise.all(committees.map((committee: any) => this.prisma.committeeTask.count({
@@ -156,62 +161,71 @@ export class CommitteeDashboardService {
     };
   }
 
-  async getClubLeadershipOverview(user: RequestUser | undefined) {
+  async listStaffReads(user: RequestUser | undefined) {
+    if (!user?.memberId || !(await this.access.hasGlobalPermission(user.memberId, 'audit.staff_reads.view'))) throw new ForbiddenException();
+    return this.auditReader!.recent();
+  }
+
+  async getClubLeadershipOverview(user: RequestUser | undefined, afterMemberId = 0, afterEventId = 0) {
     if (!user?.memberId || !(await this.access.hasGlobalPermission(user.memberId, 'club.dashboard.view'))) throw new ForbiddenException();
     const today = new Date(new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Riyadh' }));
-    const [person, members, tasks, points, monthPoints, completedTasks, activeTasks, tasksDueThisWeek, events, registrationGroups, committees, committeePointTotals, canAddMembers]: any[] = await Promise.all([
-      this.prisma.person.findUnique({ where: { personId: user.personId }, select: { fullName: true } }),
-      this.prisma.member.findMany({
-        where: { isActive: true, person: { isActive: true } },
-        include: {
-          person: true,
-          committees: { select: { role: true, committeeId: true, committee: { select: { committeeCode: true, committeeName: true, parent: { select: { committeeCode: true } } } } } },
+    const members = await this.prisma.member.findMany({
+        where: { isActive: true, memberId: {gt: afterMemberId}, person: { isActive: true } },
+        take: 101, orderBy: {memberId: 'asc'},
+        select: {
+          memberId: true, person: {select: {fullName: true, emailPersonal: true}},
+          committees: { select: { role: true, committeeId: true, committee: { select: { committeeCode: true, committeeName: true } } } },
           roleAssignments: {
             where: { AND: [{ OR: [{ startsOn: null }, { startsOn: { lte: today } }] }, { OR: [{ endsOn: null }, { endsOn: { gte: today } }] }] },
             select: { roleCode: true },
           },
         },
-        orderBy: { person: { fullName: 'asc' } },
-      }),
+      });
+    const memberIds = members.map(row => row.memberId);
+    const [person, tasks, points, completedTasks, activeTasks, tasksDueThisWeek, events, registrationGroups, committees, committeePointTotals, canAddMembers]: any[] = await Promise.all([
+      this.prisma.person.findUnique({ where: { personId: user.personId }, select: { fullName: true } }),
       this.prisma.committeeTask.findMany({
-        include: {
-          assignee: { include: { person: true } },
+        select: {
+          taskId:true,title:true,description:true,assignedMemberId:true,createdByMemberId:true,dueAt:true,priority:true,status:true,taskScope:true,eventId:true,createdAt:true,updatedAt:true,
+          event:{select:{name:true}},
+          assignee: { select: { person: {select: { fullName: true }} } },
           committee: { select: { committeeCode: true, committeeName: true } },
         },
         orderBy: [{ dueAt: 'asc' }, { taskId: 'desc' }], take: 200,
       }),
       this.prisma.committeePointEntry.findMany({
-        include: {
-          recipient: { include: { member: { include: { person: true } }, committee: { select: { committeeCode: true, committeeName: true } } } },
+        select: {
+          pointEntryId:true,memberId:true,pointsDelta:true,reason:true,createdAt:true,
+          recipient: { select: { member: { select: { person: {select: { fullName: true }} } }, committee: { select: { committeeCode: true, committeeName: true } } } },
         },
         orderBy: [{ createdAt: 'desc' }, { pointEntryId: 'desc' }], take: 200,
       }),
-      (this.prisma.committeePointEntry as any).groupBy({ by: ['memberId', 'committeeId'], where: { createdAt: { gte: riyadhPeriodStart(new Date(), 'month') } }, _sum: { pointsDelta: true } }),
-      (this.prisma.committeeTask as any).groupBy({ by: ['assignedMemberId'], where: { status: CommitteeTaskStatus.COMPLETED }, _count: { _all: true } }),
+      (this.prisma.committeeTask as any).groupBy({ by: ['assignedMemberId'], where: {assignedMemberId:{in:memberIds},status: CommitteeTaskStatus.COMPLETED}, _count: { _all: true } }),
       this.prisma.committeeTask.count({ where: { status: { in: ACTIVE_TASK_STATUSES } } }),
       this.prisma.committeeTask.count({ where: { status: { in: ACTIVE_TASK_STATUSES }, dueAt: { gte: riyadhPeriodStart(new Date(), 'week'), lt: new Date(riyadhPeriodStart(new Date(), 'week').getTime() + 7 * 86400000) } } }),
       this.prisma.event.findMany({
-        include: { _count: { select: { registrations: true } } },
-        orderBy: { startsAt: 'asc' },
+        select: {eventId:true,name:true,startsAt:true,endsAt:true,location:true,imageUrl:true,status:true,capacity:true,createdAt:true,_count:{select:{registrations:true}}},
+        where:{eventId:{gt:afterEventId}}, take:101, orderBy:{eventId:'asc'},
       }),
       (this.prisma.eventRegistration as any).groupBy({ by: ['status'], _count: { _all: true } }),
       this.prisma.committee.findMany({ select: { committeeCode: true, committeeName: true }, orderBy: { committeeName: 'asc' } }),
-      (this.prisma.committeePointEntry as any).groupBy({ by: ['memberId', 'committeeId'], _sum: { pointsDelta: true } }),
+      (this.prisma.committeePointEntry as any).groupBy({ by: ['memberId', 'committeeId'], where:{memberId:{in:memberIds}}, _sum: { pointsDelta: true } }),
       this.access.hasGlobalPermission(user.memberId, MEMBERS_PERMISSION),
     ]);
-    const [globalPointTotals, globalPoints, globalMonthPoints] = await Promise.all([
-      (this.prisma.globalPointEntry as any).groupBy({ by: ['memberId'], _sum: { pointsDelta: true } }),
+    const [globalPointTotals, globalPoints] = await Promise.all([
+      (this.prisma.globalPointEntry as any).groupBy({ by: ['memberId'], where:{memberId:{in:memberIds}}, _sum: { pointsDelta: true } }),
       this.prisma.globalPointEntry.findMany({
-        include: { recipient: { include: { person: { select: { fullName: true } } } } },
+        select: { pointEntryId:true,memberId:true,pointsDelta:true,reason:true,createdAt:true, recipient: { select: { person: { select: { fullName: true } } } } },
         orderBy: [{ createdAt: 'desc' }, { pointEntryId: 'desc' }], take: 200,
       }),
-      (this.prisma.globalPointEntry as any).groupBy({ by: ['memberId'], where: { createdAt: { gte: riyadhPeriodStart(new Date(), 'month') } }, _sum: { pointsDelta: true } }),
     ]);
     const globalPointsByMember = new Map((globalPointTotals as any[]).map((row: any) => [row.memberId, row._sum.pointsDelta ?? 0]));
     const memberCommitteePoints = new Map((committeePointTotals as any[]).map((row: any) => [`${row.memberId}:${row.committeeId}`, row._sum.pointsDelta ?? 0]));
-    const committeeMonthPoints = new Map((monthPoints as any[]).map((row: any) => [`${row.memberId}:${row.committeeId}`, row._sum.pointsDelta ?? 0]));
-    const globalMonthPointsByMember = new Map((globalMonthPoints as any[]).map((row: any) => [row.memberId, row._sum.pointsDelta ?? 0]));
     const memberCompletedTasks = new Map((completedTasks as any[]).map((row: any) => [row.assignedMemberId, row._count._all]));
+    const moreMembers = members.length > 100;
+    if (moreMembers) members.pop();
+    const nextMemberCursor = moreMembers ? members[99].memberId : null;
+    members.sort((a: any, b: any) => a.person.fullName.localeCompare(b.person.fullName));
     const mappedMembers = (members as any[]).map((member: any) => {
       const self = member.memberId === user.memberId;
       const globalRoleDeveloperLeader = member.roleAssignments.some(({ roleCode }: { roleCode: string }) => roleCode === 'DEVELOPER_COMMITTEES_LEADER');
@@ -224,10 +238,6 @@ export class CommitteeDashboardService {
         };
       });
       const visibleCommitteePoints = committeesWithVisibility.reduce((sum: number, item: any) => sum + item.points, 0);
-      const visibleCommitteeMonthPoints = member.committees.reduce((sum: number, item: any) => {
-        const pointsVisible = !self;
-        return sum + (pointsVisible ? committeeMonthPoints.get(`${member.memberId}:${item.committeeId}`) ?? 0 : 0);
-      }, 0);
       const globalPointsVisible = !self && globalRoleDeveloperLeader;
       return {
       id: String(member.memberId), name: member.person.fullName,
@@ -237,31 +247,49 @@ export class CommitteeDashboardService {
       pointsVisible: !self && (committeesWithVisibility.some((item: any) => item.pointsVisible) || globalPointsVisible),
       globalPoints: globalPointsVisible ? globalPointsByMember.get(member.memberId) ?? 0 : 0,
       globalPointsVisible,
-      visiblePointsThisMonth: visibleCommitteeMonthPoints + (globalPointsVisible ? globalMonthPointsByMember.get(member.memberId) ?? 0 : 0),
       tasksCompleted: memberCompletedTasks.get(member.memberId) ?? 0, lastActivity: null,
       committees: committeesWithVisibility,
       globalRoles: member.roleAssignments.map(({ roleCode }: { roleCode: string }) => roleCode),
     }; });
+    const nextEventCursor = events.length > 100 ? events[99].eventId : null;
+    if (nextEventCursor !== null) events.pop();
+    const [totals] = await this.prisma.$queryRaw<Array<{members:number;points:number;month:number}>>`
+      WITH active AS (
+        SELECT m.member_id FROM member m JOIN person p USING(person_id) WHERE m.is_active AND p.is_active
+      ), visible AS (
+        SELECT e.points_delta,e.created_at FROM committee_point_entry e JOIN active USING(member_id)
+        WHERE e.member_id <> ${user.memberId}
+        UNION ALL
+        SELECT e.points_delta,e.created_at FROM global_point_entry e JOIN active USING(member_id)
+        WHERE e.member_id <> ${user.memberId} AND EXISTS (
+          SELECT FROM member_role mr WHERE mr.member_id = e.member_id AND mr.role_code = 'DEVELOPER_COMMITTEES_LEADER'
+          AND (mr.starts_on IS NULL OR mr.starts_on <= ${today}::date) AND (mr.ends_on IS NULL OR mr.ends_on >= ${today}::date)
+        )
+      )
+      SELECT (SELECT count(*) FROM active)::integer AS members, coalesce(sum(points_delta),0)::float8 AS points,
+        coalesce(sum(points_delta) FILTER (WHERE created_at >= ${riyadhPeriodStart(new Date(),'month')}),0)::float8 AS month FROM visible`;
     const now = new Date();
-    const visiblePointsThisMonth = mappedMembers.reduce((sum: number, member: any) => sum + member.visiblePointsThisMonth, 0);
+    const published = EventStatus.PUBLISHED;
+    const [eventsCreated, upcomingEvents, upcomingSoon, publishedThisYear] = await Promise.all([
+      this.prisma.event.count(),this.prisma.event.count({where:{status:published,startsAt:{gte:now}}}),
+      this.prisma.event.count({where:{status:published,startsAt:{gte:now,lt:new Date(+now+30*86400000)}}}),
+      this.prisma.event.count({where:{status:published,createdAt:{gte:new Date(Date.UTC(now.getUTCFullYear(),0,1)),lt:new Date(Date.UTC(now.getUTCFullYear()+1,0,1))}}}),
+    ]);
     return {
       committee: { id: null, code: 'CLUB', name: 'GDG on Campus UJ' },
       currentMember: user.memberId ? { id: String(user.memberId), name: person?.fullName ?? '', role: 'Club Leadership' } : null,
+      nextMemberCursor, nextEventCursor,
       stats: {
-        committeeMembers: mappedMembers.length, activeMembers: mappedMembers.length, awayMembers: 0,
-        upcomingEvents: (events as any[]).filter((event: any) => event.status === 'PUBLISHED' && event.startsAt >= now).length,
-        upcomingEventsInNext30Days: (events as any[]).filter((event: any) => event.status === 'PUBLISHED' && event.startsAt >= now && event.startsAt < new Date(now.getTime() + 30 * 86400000)).length,
-        totalPoints: mappedMembers.reduce((sum: number, member: any) => sum + member.points, 0),
-        pointsThisMonth: visiblePointsThisMonth,
-        activeTasks, tasksDueThisWeek, eventsCreated: events.length,
-        eventsPublishedThisYear: (events as any[]).filter((event: any) => event.status === 'PUBLISHED' && event.createdAt.getUTCFullYear() === now.getUTCFullYear()).length,
+        committeeMembers: totals.members, activeMembers: totals.members, awayMembers: 0,
+        upcomingEvents, upcomingEventsInNext30Days:upcomingSoon, totalPoints:totals.points, pointsThisMonth:totals.month,
+        activeTasks,tasksDueThisWeek,eventsCreated,eventsPublishedThisYear:publishedThisYear,
         pendingRegistrations: (registrationGroups as any[]).find(({ status }: { status: string }) => status === 'PENDING')?._count._all ?? 0,
         acceptedRegistrations: (registrationGroups as any[]).filter(({ status }: { status: string }) => ['CONFIRMED', 'AWAITING_CONFIRMATION'].includes(status)).reduce((sum: number, row: any) => sum + row._count._all, 0),
         rejectedRegistrations: (registrationGroups as any[]).filter(({ status }: { status: string }) => ['REJECTED', 'NOT_SELECTED'].includes(status)).reduce((sum: number, row: any) => sum + row._count._all, 0),
       },
       permissions: { canManageTasks: false, canManagePoints: await this.access.hasGlobalPermission(user.memberId, CLUB_POINTS_PERMISSION), canManageRegistrations: false, canAddMembers },
       committees: (committees as any[]).map(({ committeeCode, committeeName }: { committeeCode: string; committeeName: string }) => ({ code: committeeCode, name: committeeName })),
-      members: mappedMembers.map(({ visiblePointsThisMonth: _visiblePointsThisMonth, ...member }: any) => member),
+      members: mappedMembers,
       events: (events as any[]).map((event: any) => ({
         id: String(event.eventId), title: event.name, date: event.startsAt.toISOString(), endsAt: event.endsAt.toISOString(),
         location: event.location, imageUrl: event.imageUrl, status: event.status, registered: event._count.registrations,
@@ -270,7 +298,7 @@ export class CommitteeDashboardService {
       tasks: (tasks as any[]).map((task: any) => ({
         id: String(task.taskId), title: task.title, description: task.description,
         assignedMemberId: String(task.assignedMemberId), assignedMemberName: task.assignee.person.fullName,
-        createdByMemberId: String(task.createdByMemberId), dueAt: task.dueAt.toISOString(), priority: task.priority,
+        createdByMemberId: task.createdByMemberId?.toString() ?? null, dueAt: task.dueAt.toISOString(), priority: task.priority,
         status: task.status, taskScope: task.taskScope ?? 'COMMITTEE', eventId: task.eventId == null ? null : String(task.eventId), eventTitle: task.event?.name ?? null, createdAt: task.createdAt.toISOString(), updatedAt: task.updatedAt.toISOString(),
         committeeCode: task.committee.committeeCode, committeeName: task.committee.committeeName,
       })),
@@ -344,7 +372,7 @@ export class CommitteeDashboardService {
             walletLinks: { where: { revokedAt: null }, take: 1, select: { verifiedAt: true } },
           } : {}),
         },
-        orderBy: [{ role: 'asc' }, { member: { person: { fullName: 'asc' } } }],
+        orderBy: { role: 'asc' },
       }),
       this.prisma.event.findMany({
         where: { committeeId: committee.committeeId },
@@ -399,6 +427,7 @@ export class CommitteeDashboardService {
         memberCompletedTasks.set(task.assignedMemberId, (memberCompletedTasks.get(task.assignedMemberId) ?? 0) + 1);
       }
     }
+    memberships.sort(directoryOrder);
     const activeMemberships = (memberships as any[]).filter(({ member }: { member: any }) => member.isActive);
     const canViewLeadershipPoints = (targetId: number, role: string) => {
       if (targetId === memberId) return false;
@@ -435,7 +464,7 @@ export class CommitteeDashboardService {
       description: task.description,
       assignedMemberId: String(task.assignedMemberId),
       assignedMemberName: task.assignee.person.fullName,
-      createdByMemberId: String(task.createdByMemberId),
+      createdByMemberId: task.createdByMemberId?.toString() ?? null,
       dueAt: task.dueAt.toISOString(),
       priority: task.priority,
       status: task.status, taskScope: task.taskScope ?? 'COMMITTEE',
@@ -527,16 +556,15 @@ export class CommitteeDashboardService {
         await transaction.memberCommittee.create({
           data: { memberId: member.memberId, committeeId: committee.committeeId, role: 'Member' },
         });
-        return { result: { id: String(member.memberId), name: person.fullName, email, role: 'Member', status: 'Active' }, recipientName: person.fullName };
+        return { id: String(member.memberId), name: person.fullName, email, role: 'Member', status: 'Active' };
       });
       this.dispatchMembershipAssignmentEmail({
         to: email,
-        recipientName: assigned.recipientName,
         decision: 'APPROVED',
         committeeName: committee.committeeName,
         roleName: 'Member',
       });
-      return assigned.result;
+      return assigned;
     } catch (error: any) {
       if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
         throw new ConflictException('This person is already a member of the committee.');
@@ -566,12 +594,10 @@ export class CommitteeDashboardService {
           memberId: String(member.memberId), name: person.fullName, email,
           committee: { code: committee.committeeCode, name: committee.committeeName, role: membership.role },
         },
-        recipientName: person.fullName,
       };
     });
     this.dispatchMembershipAssignmentEmail({
       to: email,
-      recipientName: assigned.recipientName,
       decision: 'APPROVED',
       committeeName: committee.committeeName,
       roleName: dto.role,
@@ -863,7 +889,6 @@ export class CommitteeDashboardService {
         });
         return {
           result: { memberId: String(member.memberId), name: person.fullName, email, role: dto.role },
-          recipientName: person.fullName,
           committeeName: undefined as string | undefined,
           globalRoleName: dto.role === 'ADVISOR' ? 'Advisor' : 'Developer Committees Leader',
           roleName: dto.role === 'ADVISOR' ? 'Advisor' : 'Leader',
@@ -883,7 +908,6 @@ export class CommitteeDashboardService {
           memberId: String(member.memberId), name: person.fullName, email,
           committee: { code: committee.committeeCode, name: committee.committeeName, role: membership.role },
         },
-        recipientName: person.fullName,
         committeeName: committee.committeeName,
         globalRoleName: undefined as string | undefined,
         roleName: membership.role,
@@ -893,7 +917,6 @@ export class CommitteeDashboardService {
     if (assigned.notifyEmail) {
       this.dispatchMembershipAssignmentEmail({
         to: email,
-        recipientName: assigned.recipientName,
         decision: 'APPROVED',
         ...(assigned.committeeName ? { committeeName: assigned.committeeName } : { globalRoleName: assigned.globalRoleName }),
         roleName: assigned.roleName,
@@ -917,7 +940,6 @@ export class CommitteeDashboardService {
       });
       this.dispatchMembershipAssignmentEmail({
         to: member.person.emailPersonal ?? member.person.emailUniversity,
-        recipientName: member.person.fullName,
         decision: 'APPROVED',
         committeeName: committee.committeeName,
         roleName: membership.role,
@@ -951,16 +973,7 @@ export class CommitteeDashboardService {
             { emailIdentities: { some: { email: { equals: email, mode: 'insensitive' } } } },
           ],
         },
-        include: {
-          member: {
-            include: {
-              roleAssignments: {
-                where: { endsOn: null, OR: [{ startsOn: null }, { startsOn: { lte: new Date() } }] },
-                select: { roleCode: true },
-              },
-            },
-          },
-        },
+        include: { member: true },
         orderBy: { personId: 'asc' },
         take: 2,
       });
@@ -1044,67 +1057,7 @@ export class CommitteeDashboardService {
         };
       }
 
-      const groupLeadershipCodes = ['GROUP_LEADER', 'GROUP_CO_LEADER'];
-      const hasGroupLeadershipRole = member.roleAssignments.some(({ roleCode }) =>
-        groupLeadershipCodes.includes(roleCode),
-      );
-      if (hasGroupLeadershipRole) {
-        // Serialize leadership removals so two requests cannot remove the last
-        // active group leader at the same time.
-        await transaction.$queryRaw`
-          SELECT id FROM "member_role"
-          WHERE "role_code" IN ('GROUP_LEADER', 'GROUP_CO_LEADER')
-            AND "ends_on" IS NULL
-          FOR UPDATE`;
-        const today = new Date();
-        today.setHours(0, 0, 0, 0);
-        const otherLeaders = await transaction.memberRole.findMany({
-          where: {
-            memberId: { not: member.memberId },
-            roleCode: { in: groupLeadershipCodes },
-            endsOn: null,
-            member: { isActive: true, person: { isActive: true } },
-            OR: [{ startsOn: null }, { startsOn: { lte: today } }],
-          },
-          distinct: ['memberId'],
-          take: 1,
-          select: { memberId: true },
-        });
-        if (otherLeaders.length === 0) {
-          throw new ConflictException('The last active group leader cannot be removed.');
-        }
-      }
-
-      // Keep the Person/AuthUser account so it can still sign in as a guest,
-      // but permanently remove the member identity and its personal records.
-      // Shared records (events and points awarded to others) remain intact;
-      // their attribution is cleared before deleting the member.
-      await transaction.event.updateMany({
-        where: { createdByMemberId: member.memberId },
-        data: { createdByMemberId: null },
-      });
-      await transaction.eventRegistration.updateMany({ where: { reviewedByMemberId: member.memberId }, data: { reviewedByMemberId: null } });
-      await transaction.eventRegistration.updateMany({ where: { checkedInByMemberId: member.memberId }, data: { checkedInByMemberId: null } });
-      await transaction.eventRegistration.updateMany({ where: { excusedByMemberId: member.memberId }, data: { excusedByMemberId: null } });
-      await transaction.registrationBlacklistEntry.updateMany({ where: { resolvedByMemberId: member.memberId }, data: { resolvedByMemberId: null } });
-      await transaction.membershipRequestCommittee.updateMany({ where: { decidedByMemberId: member.memberId }, data: { decidedByMemberId: null } });
-      await transaction.membershipRequestGlobalRole.updateMany({ where: { decidedByMemberId: member.memberId }, data: { decidedByMemberId: null } });
-      await transaction.memberRole.updateMany({ where: { assignedBy: member.memberId }, data: { assignedBy: null } });
-      await transaction.committeePointEntry.updateMany({ where: { awardedByMemberId: member.memberId }, data: { awardedByMemberId: null } });
-      await transaction.globalPointEntry.updateMany({ where: { awardedByMemberId: member.memberId }, data: { awardedByMemberId: null } });
-
-      await transaction.announcement.deleteMany({ where: { publishedByMemberId: member.memberId } });
-      await transaction.committeeTask.deleteMany({
-        where: { OR: [{ assignedMemberId: member.memberId }, { createdByMemberId: member.memberId }] },
-      });
-      await transaction.committeePointEntry.deleteMany({ where: { memberId: member.memberId } });
-      await transaction.globalPointEntry.deleteMany({ where: { memberId: member.memberId } });
-      await transaction.walletBarcodeAlias.deleteMany({ where: { link: { memberId: member.memberId } } });
-      await transaction.walletMembershipLink.deleteMany({ where: { memberId: member.memberId } });
-      await transaction.memberSkill.deleteMany({ where: { memberId: member.memberId } });
-      await transaction.memberCommittee.deleteMany({ where: { memberId: member.memberId } });
-      await transaction.memberRole.deleteMany({ where: { memberId: member.memberId } });
-      await transaction.member.delete({ where: { memberId: member.memberId } });
+      await removeMember(transaction, member);
 
       return {
         memberId: String(member.memberId),
@@ -1365,9 +1318,9 @@ export class CommitteeDashboardService {
           },
         },
       },
-      orderBy: [{ role: 'asc' }, { member: { person: { fullName: 'asc' } } }],
+      orderBy: { role: 'asc' },
     });
-    return memberships.map(({ member, role }: any) => ({
+    return memberships.sort(directoryOrder).map(({ member, role }: any) => ({
       id: String(member.memberId),
       name: member.person.fullName,
       role,
@@ -1387,13 +1340,13 @@ export class CommitteeDashboardService {
 
   private mapTask(task: {
     taskId: number; title: string; description: string; assignedMemberId: number;
-    createdByMemberId: number; dueAt: Date; priority: string; status: string;
+    createdByMemberId: number | null; dueAt: Date; priority: string; status: string;
     createdAt: Date; updatedAt: Date; assignee: { person: { fullName: string } }; taskScope?: string; eventId?: number | null; event?: { name: string } | null;
   }) {
     return {
       id: String(task.taskId), title: task.title, description: task.description,
       assignedMemberId: String(task.assignedMemberId), assignedMemberName: task.assignee.person.fullName,
-      createdByMemberId: String(task.createdByMemberId), dueAt: task.dueAt.toISOString(),
+      createdByMemberId: task.createdByMemberId?.toString() ?? null, dueAt: task.dueAt.toISOString(),
       priority: task.priority, status: task.status, taskScope: task.taskScope ?? 'COMMITTEE',
       eventId: task.eventId == null ? null : String(task.eventId), eventTitle: task.event?.name ?? null,
       createdAt: task.createdAt.toISOString(),

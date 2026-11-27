@@ -5,6 +5,9 @@ import type { NestExpressApplication } from '@nestjs/platform-express';
 import type { NextFunction, Request, Response } from 'express';
 import { getAllowedFrontendOrigins, validateProductionHttpConfig } from './common/http/frontend-origins.js';
 
+import { IncidentAlerts } from './common/http/incident-alerts.js';
+import { SmtpEmailService } from './common/email/smtp-email.service.js';
+
 const PRIVATE_CACHE_CONTROL = 'private, no-store';
 
 export function configureHttp(app: NestExpressApplication) {
@@ -18,7 +21,22 @@ export function configureHttp(app: NestExpressApplication) {
   const peers = trustedCloudflarePeers();
   if (peers.length && trustProxyHops !== 0) throw new Error('Set TRUST_PROXY_HOPS=0 with TRUSTED_CF_PROXY_IPS.');
   app.getHttpAdapter().getInstance().set('trust proxy', peers.length ? peers : trustProxyHops);
-  app.use((_request: Request, response: Response, next: NextFunction) => {
+  const contact = process.env.SECURITY_ALERT_EMAIL?.trim();
+  const smtp = app.get(SmtpEmailService);
+  if (contact && (!smtp.isConfigured() || !smtp.getFromAddress())) throw new Error('Security alerts require configured SMTP delivery.');
+  const alerts = new IncidentAlerts(async (signal, count) => {
+    if (contact) await smtp.sendMail({
+      from: smtp.getFromAddress(),
+      to: contact,
+      subject: 'gdguj.org security alert',
+      text: `Signal: ${signal}. Observed ${count} requests within five minutes. Review the incident runbook.`,
+    });
+  });
+  app.use((request: Request, response: Response, next: NextFunction) => {
+    response.once('finish', () => {
+      const path = request.method === 'POST' ? request.path : request.route?.path;
+      if (typeof path === 'string') alerts.observe(request.method, path, response.statusCode);
+    });
     response.setHeader('Cache-Control', PRIVATE_CACHE_CONTROL);
     response.setHeader('X-Content-Type-Options', 'nosniff');
     response.setHeader('X-Frame-Options', 'DENY');
@@ -31,7 +49,7 @@ export function configureHttp(app: NestExpressApplication) {
     origin: getAllowedFrontendOrigins(),
     credentials: true,
     methods: ['GET', 'POST', 'PATCH', 'PUT', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'X-GDG-Expected-Person'],
     maxAge: 600,
   });
   const auth = app.get(BetterAuthService).auth;

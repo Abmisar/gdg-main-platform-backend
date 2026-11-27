@@ -1,3 +1,4 @@
+import { directoryOrder } from './directory-order.js';
 import { BadRequestException, ConflictException, ForbiddenException, Inject, Injectable, NotFoundException } from '@nestjs/common';
 import { EventStatus } from '../generated/prisma/client.js';
 import type { RequestUser } from '../auth/auth.guard.js';
@@ -199,12 +200,12 @@ export class LeadershipTasksService {
         members: {
           where: { role: { in: ['Leader', 'Co-Leader'] }, member: { isActive: true, person: { isActive: true } } },
           select: { memberId: true, role: true, member: { select: { person: { select: { fullName: true } } } } },
-          orderBy: [{ role: 'asc' }, { member: { person: { fullName: 'asc' } } }],
+          orderBy: { role: 'asc' },
         },
       },
       orderBy: { committeeName: 'asc' },
     });
-    const targets = committees.flatMap((committee: any) => committee.members.map((seat: any) => ({
+    const targets = committees.flatMap((committee: any) => committee.members.sort(directoryOrder).map((seat: any) => ({
       memberId: String(seat.memberId), name: seat.member.person.fullName,
       committeeCode: committee.committeeCode, committeeName: committee.committeeName, role: seat.role,
     })));
@@ -315,7 +316,7 @@ export class LeadershipTasksService {
     return {
       id: String(task.taskId), title: task.title, description: task.description,
       assignedMemberId: String(task.assignedMemberId), assignedMemberName: task.assignee.person.fullName,
-      createdByMemberId: String(task.createdByMemberId), dueAt: task.dueAt.toISOString(),
+      createdByMemberId: task.createdByMemberId?.toString() ?? null, dueAt: task.dueAt.toISOString(),
       priority: task.priority, status: task.status, taskScope: task.taskScope,
       committeeCode: task.committee.committeeCode, committeeName: task.committee.committeeName,
       eventId: task.eventId == null ? null : String(task.eventId), eventTitle: task.event?.name ?? null,

@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { BadGatewayException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -38,6 +39,28 @@ describe('committee and announcement asset storage', () => {
     storage.from.mockReturnValue(storage);
     storage.upload.mockResolvedValue({ error: null });
     storage.getPublicUrl.mockReturnValue({ data: { publicUrl: 'https://images.example.test/file.gif' } });
+  });
+
+  it('binds the validated media type and exact image bytes to the OCI signature', async () => {
+    const fetch = vi.fn(async (request: Request) => {
+      const headers = request.headers;
+      expect(headers.get('content-type')).toBe(image.mimetype);
+      expect(headers.get('x-amz-content-sha256')).toBe(createHash('sha256').update(image.buffer).digest('hex'));
+      const signed = headers.get('authorization')?.match(/SignedHeaders=([^,]+)/)?.[1].split(';');
+      expect(signed).toEqual(expect.arrayContaining(['content-type', 'x-amz-content-sha256']));
+      expect(Buffer.from(await request.arrayBuffer())).toEqual(image.buffer);
+      return new Response(null, { status: 200 });
+    });
+    vi.stubGlobal('fetch', fetch);
+    try {
+      await service({
+        ASSET_S3_ENDPOINT: 'https://storage.example.test', ASSET_BUCKET: 'artwork',
+        ASSET_S3_KEY: 'fixture', ASSET_S3_SECRET: 'fixture', ASSET_PUBLIC_BASE: 'https://images.example.test',
+      }).upload(image);
+      expect(fetch).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 
   it('reads bucket metadata on every upload and preserves event and announcement paths', async () => {

@@ -13,7 +13,7 @@ function fixture(method = 'GET', origin = 'http://localhost:3000') {
 }
 beforeEach(() => {
   vi.stubEnv('FRONTEND_URL', 'http://localhost:3000');
-  session.mockReset().mockResolvedValue({ user: { id: 'identity-id', email: 'member@example.test', emailVerified: true } });
+  session.mockReset().mockResolvedValue({ session: { id: 'session-id' }, user: { id: 'identity-id', email: 'member@example.test', emailVerified: true } });
   findUnique.mockReset().mockResolvedValue({ personId: 1, isActive: true, member: { memberId: 2, isActive: true } });
   reconcileVerifiedIdentity.mockReset().mockResolvedValue(undefined);
 });
@@ -21,7 +21,7 @@ afterEach(() => vi.unstubAllEnvs());
 it('maps verified server identity to existing active member', async () => {
   const f = fixture(); await guard.canActivate(f.context);
   expect(findUnique).toHaveBeenCalledWith(expect.objectContaining({ where: { authUserId: 'identity-id' } }));
-  expect(f.request.user).toEqual({ personId: 1, memberId: 2, email: 'member@example.test', fromEmailLink: false });
+  expect(f.request.user).toEqual({ personId: 1, sessionId: 'session-id', memberId: 2, email: 'member@example.test', fromEmailLink: false });
 });
 it.each([null, { user: { emailVerified: false } }])('does not grant identity to missing or unverified session', async value => {
   session.mockResolvedValue(value); const f = fixture(); await guard.canActivate(f.context);

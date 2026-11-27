@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import type { INestApplication } from '@nestjs/common';
-import { SchedulerRegistry } from '@nestjs/schedule';
+import { ScheduleModule, SchedulerRegistry } from '@nestjs/schedule';
 import { Test } from '@nestjs/testing';
 import request from 'supertest';
 import { AppModule } from '../src/app.module.js';
@@ -97,7 +97,7 @@ function asMember(memberId: number) {
 
 beforeAll(async () => {
   const moduleRef = await Test.createTestingModule({
-    imports: [AppModule],
+    imports: [AppModule, ...(process.env.SCHEDULERS_ENABLED === 'false' ? [ScheduleModule.forRoot()] : [])],
   }).compile();
   app = moduleRef.createNestApplication();
   // Stand-in for the auth layer, which will set request.user.
@@ -313,7 +313,7 @@ describe('PUT /events/:eventId/waitlist', () => {
         .put(`/events/${event.eventId}/waitlist`)
         .send({ registrationIds })
         .expect(409);
-      expect(response.body.error.code).toBe('CONFLICT');
+      expect(response.body.error.code).toBe('WAITLIST_ORDER_IMMUTABLE');
       await expect(review.setWaitlist(event.eventId, registrationIds, prMemberId)).rejects.toMatchObject({
         errorCode: 'WAITLIST_ORDER_IMMUTABLE',
       });

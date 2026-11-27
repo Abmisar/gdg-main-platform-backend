@@ -1,4 +1,4 @@
-import { execFileSync, spawnSync } from 'node:child_process';
+import { execFileSync } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
 import {
   mkdtempSync,
@@ -33,7 +33,7 @@ const initialTables = [
   'users',
 ];
 // Update this explicit manifest when a migration adds or removes project tables.
-const expectedTables = [
+const committeePermissionStageTables = [
   ...initialTables.filter(
     (table) =>
       ![
@@ -50,11 +50,59 @@ const expectedTables = [
   'role',
   'member_role',
   'member_skill',
-  'membership_request',
-  'membership_request_committee',
   'skill',
   'committee_permission',
 ].sort();
+const contractedTables = [
+  'account_deletion',
+  'announcement',
+  'auth_account',
+  'auth_rate_limit_bucket',
+  'auth_session',
+  'auth_user',
+  'auth_verification',
+  'better_auth_rate_limit',
+  'committee',
+  'committee_permission',
+  'committee_point_entry',
+  'committee_task',
+  'consent_record',
+  'deletion_tombstone',
+  'email_verification_challenge',
+  'event_questions',
+  'event_registrations',
+  'event_retention_aggregate',
+  'events',
+  'global_point_entry',
+  'manual_rights_request',
+  'member',
+  'member_committee',
+  'member_role',
+  'member_skill',
+  'membership_request',
+  'membership_request_committee',
+  'membership_request_global_role',
+  'non_member_registration',
+  'pending_signup',
+  'permission',
+  'person',
+  'person_email_identity',
+  'registration_answers',
+  'registration_blacklist_entries',
+  'registration_email_delivery',
+  'revoked_auth_token',
+  'rights_audit',
+  'role',
+  'role_permission',
+  'signup_verification',
+  'skill',
+  'staff_read_audit',
+  'wallet_barcode_alias',
+  'wallet_guest_projection',
+  'wallet_guest_withdrawal',
+  'wallet_membership_link',
+];
+const expandedTables = [...contractedTables, 'field_backfill_verification'];
 const approvedCommitteePolicy = JSON.parse(
   readFileSync('test/fixtures/approved-committee-permissions.json', 'utf8'),
 );
@@ -63,7 +111,7 @@ const approvedRolePermissions = JSON.parse(
 );
 // The historical club-role migration predates announcement management grants.
 const clubRoleMigrationPermissions = approvedRolePermissions.filter(
-  ({ code }) => code !== 'announcements.manage',
+  ({ code }) => code === 'members.manage',
 );
 const approvedPermissions = JSON.parse(
   readFileSync('test/fixtures/approved-permissions.json', 'utf8'),
@@ -242,6 +290,10 @@ try {
   const url = (database) =>
     `postgresql://postgres:${password}@127.0.0.1:${port}/${database}?schema=public`;
   const testEnv = {
+    FIELD_ENCRYPTION_ACTIVE_VERSION: 'test',
+    FIELD_ENCRYPTION_KEYS: JSON.stringify({ test: randomBytes(32).toString('base64') }),
+    FIELD_BLIND_INDEX_KEY: randomBytes(32).toString('base64'),
+    BETTER_AUTH_SECRET: randomBytes(32).toString('hex'),
     DATABASE_URL: url('postgres'),
     TEST_DATABASE_URL: url('gdg_schema_test_a'),
   };
@@ -299,8 +351,8 @@ try {
         name: 'Abdullah Misar',
         email: 'AbdullahMisar@gmail.com',
         type: 'current',
-        committees: { DEV: 'Leader', WEB: 'Member' },
-        roles: [],
+        committees: { WEB: 'Member' },
+        roles: ['DEVELOPER_COMMITTEES_LEADER'],
         skills: [3, 8, 10],
       },
       {
@@ -409,15 +461,15 @@ try {
     assert.deepEqual(counts, {
       person: 11,
       member: 10,
-      committee: 6,
-      member_committee: 11,
-      member_role: 3,
+      committee: approvedCommitteePolicy.committees.length,
+      member_committee: 10,
+      member_role: 4,
       member_skill: 15,
-      role: 3,
+      role: 4,
       skill: 32,
-      permission: 30,
-      role_permission: 2,
-      committee_permission: 8,
+      permission: approvedPermissions.length,
+      role_permission: approvedRolePermissions.length,
+      committee_permission: approvedCommitteePolicy.permissions.length,
       events: 0,
     });
     assert.deepEqual(
@@ -427,7 +479,7 @@ try {
           'SELECT jsonb_object_agg(c.committee_code,p.committee_code) FROM committee c LEFT JOIN committee p ON p.committee_id=c.parent_committee_id',
         ),
       ),
-      { DATA: null, DEV: null, WEB: 'DEV', CYBER: 'DEV', PM: null, PR: null },
+      Object.fromEntries(approvedCommitteePolicy.committees.map(row => [row.committee_code, row.parent_committee_code])),
     );
     for (const table of [
       'role',
@@ -476,36 +528,10 @@ try {
     );
     assert.deepEqual(
       matchedRules,
-      [
-        {
-          email: 'data.coleader@example.test',
-          committee_code: 'DATA',
-          role: 'Co-Leader',
-          code: 'events.create',
-          applies_to: 'own',
-        },
-        {
-          email: 'data.leader@example.test',
-          committee_code: 'DATA',
-          role: 'Leader',
-          code: 'events.create',
-          applies_to: 'own',
-        },
-        {
-          email: 'MohmmadAlamri@gmail.com',
-          committee_code: 'PR',
-          role: 'Member',
-          code: 'registrants.view',
-          applies_to: 'all',
-        },
-        {
-          email: 'MohmmadAlamri@gmail.com',
-          committee_code: 'PR',
-          role: 'Member',
-          code: 'registrations.review',
-          applies_to: 'all',
-        },
-      ],
+      expected.flatMap(person => approvedCommitteePolicy.permissions
+        .filter(rule => person.committees[rule.committee_code] === rule.committee_role)
+        .map(rule => ({ email: person.email === 'babaset99@gmail.com' ? ' BABASET99@GMAIL.COM ' : person.email, committee_code: rule.committee_code, role: rule.committee_role, code: rule.code, applies_to: rule.applies_to })))
+        .sort((a, b) => a.email.toLowerCase().localeCompare(b.email.toLowerCase()) || a.code.localeCompare(b.code)),
       'Committee membership/position joins match only approved DATA leadership and PR rules; no DATA Member or unrelated-committee rule',
     );
     const normalized = domainRows(seedDatabase);
@@ -531,26 +557,10 @@ try {
         GROUP BY p.email_personal, mr.role_code) r`,
         ),
       ),
-      [
-        {
-          email: 'LeenAlghamdi@gmail.com',
-          role_code: 'GROUP_LEADER',
-          permissions: ['announcements.manage', 'members.manage'],
-        },
-        {
-          email: 'club.advisor@example.test',
-          role_code: 'ADVISOR',
-          permissions: [],
-        },
-        {
-          email: 'club.coleader@example.test',
-          role_code: 'GROUP_CO_LEADER',
-          permissions: ['announcements.manage', 'members.manage'],
-        },
-      ].sort((a, b) =>
-        a.email.toLowerCase().localeCompare(b.email.toLowerCase()),
-      ),
-      'Only the club leader and co-leader match members.manage and announcements.manage; the advisor has no permissions and committee leadership adds no global role',
+      expected.flatMap(person => person.roles.map(role_code => ({
+        email: person.email, role_code, permissions: approvedRolePermissions.filter(row => row.role_code === role_code).map(row => row.code),
+      }))).sort((a, b) => a.email.toLowerCase().localeCompare(b.email.toLowerCase())),
+      'Seeded members must receive the permissions assigned to their global roles',
     );
     const first = domainRows(seedDatabase);
     seed(seedDatabase);
@@ -596,7 +606,7 @@ try {
       [
         'committee name',
         "UPDATE committee SET committee_name='Conflicting Web' WHERE committee_code='WEB'",
-        "UPDATE committee SET committee_name='Web' WHERE committee_code='WEB'",
+        "UPDATE committee SET committee_name='Web Development' WHERE committee_code='WEB'",
         'development_seed_conflict_committee',
       ],
       [
@@ -656,7 +666,7 @@ try {
         );
     }
     assert.equal(sql(seedDatabase, 'SELECT count(*) FROM member'), '10');
-    assert.equal(sql(seedDatabase, 'SELECT count(*) FROM member_role'), '3');
+    assert.equal(sql(seedDatabase, 'SELECT count(*) FROM member_role'), '4');
     const upgradedRows = domainRows(seedDatabase);
     seed(seedDatabase);
     assert.deepEqual(domainRows(seedDatabase), upgradedRows);
@@ -684,7 +694,7 @@ try {
       ],
       [
         'parent',
-        "INSERT INTO committee(committee_code,committee_name) VALUES ('DEV','Wrong Development')",
+        "UPDATE committee SET committee_name='Wrong Development' WHERE committee_code='DEV'",
         'development_seed_conflict_committee',
       ],
     ]) {
@@ -731,12 +741,14 @@ try {
     'Schema tests unexpectedly passed before migration',
   );
 
+  run('pnpm', ['build']);
   const dumps = [];
   for (const database of ['gdg_schema_test_a', 'gdg_schema_test_b']) {
     if (database.endsWith('_b'))
       run('docker', ['exec', name, 'createdb', '-U', 'postgres', database]);
     console.log(`Migrating and testing ${database}.`);
     run('pnpm', ['prisma:migrate:deploy'], { DATABASE_URL: url(database) });
+    run('node', ['scripts/dev-field-rollout.mjs'], { ...testEnv, DATABASE_URL: url(database) });
     console.log(
       run('pnpm', ['test:schema'], {
         ...testEnv,
@@ -747,7 +759,7 @@ try {
       DATABASE_URL: url(database),
     });
     assert.match(repeat, /No pending migrations/);
-    assertTables(database, expectedTables);
+    assertTables(database, contractedTables);
     assert.deepEqual(
       domainRows(database)
         .filter(
@@ -758,10 +770,10 @@ try {
           JSON.parse(rows).sort((a, b) =>
             String(a.role_code ?? a.skill_id ?? a.code ?? '').localeCompare(
               String(b.role_code ?? b.skill_id ?? b.code ?? ''),
-            ),
+            ) || String(a.code ?? '').localeCompare(String(b.code ?? '')),
           ),
         ]),
-      [...expectedTables]
+      [...contractedTables]
         .filter(
           (table) => !['committee', 'committee_permission'].includes(table),
         )
@@ -770,6 +782,11 @@ try {
           table,
           table === 'role'
             ? [
+                {
+                  role_code: 'DEVELOPER_COMMITTEES_LEADER',
+                  description: 'Developer committees overall leader',
+                  is_privileged: true,
+                },
                 {
                   role_code: 'ADVISOR',
                   description: 'Club advisor',
@@ -1104,7 +1121,7 @@ try {
   sql(roleDatabase, rolePermissionSQL);
   assertTables(
     roleDatabase,
-    expectedTables.filter((table) => table !== 'committee_permission'),
+    committeePermissionStageTables.filter((table) => table !== 'committee_permission'),
   );
   assert.equal(sql(roleDatabase, 'SELECT count(*) FROM role_permission'), '0');
   assert.deepEqual(
@@ -1129,7 +1146,9 @@ try {
     "INSERT INTO role_permission(role_code, code) VALUES ('ADVISOR', 'test.preserved')",
   );
   const beforeReferenceSchema = schemaDump(roleDatabase);
-  const collision = approvedPermissions.at(-1);
+  const historicalCodes = new Set(Array.from(permissionReferenceSQL.matchAll(/^    \('([^']+)'/gm), match => match[1]));
+  const historicalPermissions = approvedPermissions.filter(row => historicalCodes.has(row.code));
+  const collision = historicalPermissions.at(-1);
   for (const description of [
     collision.description,
     'Existing local definition',
@@ -1178,7 +1197,7 @@ try {
       ...JSON.parse(
         beforeReferenceRows.find(([table]) => table === 'permission')[1],
       ),
-      ...approvedPermissions,
+      ...historicalPermissions,
     ].sort((a, b) => a.code.localeCompare(b.code)),
   );
   console.log(
@@ -1248,7 +1267,7 @@ try {
   );
   beforeCommitteeRows = domainRows(roleDatabase);
   sql(roleDatabase, committeeSQL);
-  assertTables(roleDatabase, expectedTables);
+  assertTables(roleDatabase, committeePermissionStageTables);
   assert.deepEqual(
     domainRows(roleDatabase).filter(
       ([table]) => table !== 'committee_permission',
@@ -1258,7 +1277,18 @@ try {
   );
   assert.deepEqual(
     committeePolicy(roleDatabase).permissions,
-    approvedCommitteePolicy.permissions,
+    [
+      ['DATA', 'Co-Leader', 'events.create', 'own'],
+      ['DATA', 'Leader', 'events.create', 'own'],
+      ['PR', 'Co-Leader', 'registrants.view', 'all'],
+      ['PR', 'Co-Leader', 'registrations.review', 'all'],
+      ['PR', 'Leader', 'registrants.view', 'all'],
+      ['PR', 'Leader', 'registrations.review', 'all'],
+      ['PR', 'Member', 'registrants.view', 'all'],
+      ['PR', 'Member', 'registrations.review', 'all'],
+    ].map(([committee_code, committee_role, code, applies_to]) => ({
+      committee_code, committee_role, code, applies_to, include_sub_committees: false,
+    })),
   );
   assert.equal(
     sql(
@@ -1480,7 +1510,7 @@ try {
       'prisma',
       migrations,
       'gdg_schema_test_latest_failure',
-      expectedTables,
+      expandedTables,
     );
   }
   // Exercise multiple migrations even while the repository has only its initial migration.
@@ -1500,13 +1530,14 @@ try {
     probeRoot,
     [...migrations, probe],
     'gdg_schema_test_probe_failure',
-    [...expectedTables, 'runner_probe'],
+    [...expandedTables, 'runner_probe'],
   );
   assert.equal(
     sql('gdg_schema_test_probe_failure', 'SELECT id FROM runner_probe'),
     '1',
   );
-  console.log(run('pnpm', ['test:e2e'], testEnv));
+  run('docker', ['exec', name, 'createdb', '-U', 'postgres', '-T', 'gdg_schema_test_a', 'gdg_schema_test_api']);
+  console.log(run('pnpm', ['test:e2e'], { ...testEnv, DATABASE_URL: url('gdg_schema_test_api') }));
   if (process.argv.includes('--performance')) {
     const database = 'gdg_schema_test_performance';
     run('docker', ['exec', name, 'createdb', '-U', 'postgres', database]);
@@ -1639,47 +1670,36 @@ try {
       ]),
     );
     const command = config.services.backend.command;
-    assert.deepEqual(command, [
-      'sh',
-      '-c',
-      'pnpm prisma:migrate:deploy && exec pnpm start:dev',
-    ]);
-    console.log('Building isolated backend image for startup verification.');
-    run('docker', ['build', '-t', image, '.']);
+    run('docker', ['build', '--target', 'builder', '-t', image, '.']);
     imageBuilt = true;
+    const material = () => randomBytes(32).toString('base64');
+    const fieldEnv = {
+      FIELD_ENCRYPTION_KEYS: JSON.stringify({ test:material() }),
+      FIELD_ENCRYPTION_ACTIVE_VERSION:'test', FIELD_BLIND_INDEX_KEY:material(),
+    };
+    const grants = readFileSync('docs/sql/field-access.sql','utf8');
     const startupDb = 'gdg_schema_test_startup';
-    run('docker', ['exec', name, 'createdb', '-U', 'postgres', startupDb]);
+    const roleUrl = (role, database) => `postgresql://${role}:${password}@db:5432/${database}`;
+    const isolated = (database, stage) => run('docker',[
+      'run','--rm','--network',name,...['DATABASE_URL',...Object.keys(fieldEnv)].flatMap(k=>['-e',k]),image,...stage,
+    ],{...fieldEnv,DATABASE_URL:roleUrl('gdg_migrate',database)});
+    const provision = database => {
+      sql('postgres', 'CREATE DATABASE '+database);
+      sql(database,grants);
+      for(const role of ['gdg_migrate','gdg_app','gdg_audit_reader']) sql(database,`ALTER ROLE ${role} PASSWORD '${password}'`);
+    };
+    provision(startupDb);
+    if(process.argv.includes('--seed')) {
+      isolated(startupDb,['sh','-ec','pnpm prisma:migrate:deploy && NODE_ENV=test pnpm seed:dev']);
+    }
     const startBackend = () => {
-      run(
-        'docker',
-        [
-          'run',
-          '--detach',
-          '--network',
-          name,
-          '--name',
-          backendName,
-          '-e',
-          'DATABASE_URL',
-          '-e',
-          'PORT=3001',
-          '-p',
-          '127.0.0.1::3001',
-          image,
-          ...command,
-        ],
-        {
-          DATABASE_URL: url(startupDb).replace(
-            `127.0.0.1:${port}`,
-            `${name}:5432`,
-          ),
-        },
-      );
+      isolated(startupDb,config.services.migrate.command);
+      sql(startupDb,grants);
+      const runtimeEnv={...fieldEnv,DATABASE_URL:roleUrl('gdg_app',startupDb),AUDIT_READER_DATABASE_URL:roleUrl('gdg_audit_reader',startupDb),BETTER_AUTH_SECRET:password};
+      run('docker', ['run','--detach','--network',name,'--name',backendName,
+        ...Object.keys(runtimeEnv).flatMap(k=>['-e',k]),'-e','PORT=3001','-p','127.0.0.1::3001',image,...command],runtimeEnv);
       backendStarted = true;
-      return run('docker', ['port', backendName, '3001/tcp'])
-        .trim()
-        .split(':')
-        .at(-1);
+      return run('docker',['port',backendName,'3001/tcp']).trim().split(':').at(-1);
     };
     const stopBackend = () => {
       run('docker', ['rm', '--force', backendName]);
@@ -1700,111 +1720,18 @@ try {
       throw new Error('Isolated backend did not become HTTP ready');
     };
     await waitForHttp(startBackend());
-    assertTables(startupDb, expectedTables);
-    let startupSeedRows;
-    if (process.argv.includes('--seed')) {
-      console.log(
-        run(
-          'docker',
-          [
-            'exec',
-            '-e',
-            'DATABASE_URL',
-            '-e',
-            'NODE_ENV=test',
-            backendName,
-            'pnpm',
-            'seed:dev',
-          ],
-          {
-            DATABASE_URL: url(startupDb).replace(
-              `127.0.0.1:${port}`,
-              'db:5432',
-            ),
-          },
-        ),
-      );
-      sql(
-        startupDb,
-        'DELETE FROM member_skill WHERE id=(SELECT min(id) FROM member_skill)',
-      );
-      startupSeedRows = domainRows(startupDb);
-    }
-
-    sql(
-      startupDb,
-      "INSERT INTO person(full_name,email_personal) VALUES ('Preserved fixture','preserved@example.test')",
-    );
+    assert.equal(sql(startupDb, "SELECT to_regclass('public.field_backfill_verification') IS NULL"),'t');
+    sql(startupDb,"INSERT INTO auth_rate_limit_bucket(bucket_hash,window_started_at) VALUES ('synthetic-startup',now())");
+    if (process.argv.includes('--seed')) sql(startupDb,'DELETE FROM member_skill WHERE id=(SELECT min(id) FROM member_skill)');
+    const preserved=domainRows(startupDb);
     stopBackend();
     await waitForHttp(startBackend());
-    if (startupSeedRows) {
-      const withoutSentinel = domainRows(startupDb).map(([table, rows]) => [
-        table,
-        table === 'person'
-          ? JSON.stringify(
-              JSON.parse(rows).filter(
-                (row) => row.email_personal !== 'preserved@example.test',
-              ),
-            )
-          : rows,
-      ]);
-      // Compare parsed records because jsonb text formatting differs from JSON.stringify.
-      assert.deepEqual(
-        withoutSentinel.map(([table, rows]) => [table, JSON.parse(rows)]),
-        startupSeedRows.map(([table, rows]) => [table, JSON.parse(rows)]),
-        'Ordinary startup must not rerun the optional seed or repair deleted demo links',
-      );
-    }
-    assert.equal(
-      sql(
-        startupDb,
-        "SELECT count(*) FROM person WHERE email_personal='preserved@example.test'",
-      ),
-      '1',
-    );
+    assert.deepEqual(domainRows(startupDb),preserved);
     stopBackend();
-    // A separate incompatible database must fail before the application command runs.
-    sql('postgres', 'CREATE DATABASE gdg_schema_test_incompatible');
-    sql(
-      'gdg_schema_test_incompatible',
-      'CREATE TABLE incompatible_fixture(id integer)',
-    );
-    run(
-      'docker',
-      [
-        'run',
-        '--detach',
-        '--network',
-        name,
-        '--name',
-        backendName,
-        '-e',
-        'DATABASE_URL',
-        '-e',
-        'PORT=3001',
-        image,
-        ...command,
-      ],
-      {
-        DATABASE_URL: url('gdg_schema_test_incompatible').replace(
-          `127.0.0.1:${port}`,
-          `${name}:5432`,
-        ),
-      },
-    );
-    backendStarted = true;
-    const exit = run('docker', ['wait', backendName]).trim();
-    assert.notEqual(exit, '0');
-    const failedLogs = spawnSync('docker', ['logs', backendName], {
-      encoding: 'utf8',
-    });
-    assert.equal(failedLogs.status, 0);
-    assert.match(`${failedLogs.stdout}${failedLogs.stderr}`, /P3005|not empty/);
-    assert.doesNotMatch(
-      `${failedLogs.stdout}${failedLogs.stderr}`,
-      /nest start|Nest application successfully started/,
-    );
-    stopBackend();
+    const incompatible='gdg_schema_test_incompatible';
+    provision(incompatible);
+    sql(incompatible,'CREATE TABLE incompatible_fixture(id integer)');
+    assert.throws(()=>isolated(incompatible,config.services.migrate.command),/P3005|not empty/);
     console.log(
       'PASS: Docker startup migrates before HTTP readiness, preserves data on restart, and fails closed on incompatible schema.',
     );

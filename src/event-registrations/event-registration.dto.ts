@@ -1,3 +1,4 @@
+import { ConsentSubmission } from '../data-rights/consent.js';
 import { Type } from 'class-transformer';
 import {
   ArrayMaxSize,
@@ -34,7 +35,7 @@ export class AnswerDto {
   answer: string | string[];
 }
 
-export class RegisterForEventDto {
+export class RegisterForEventDto extends ConsentSubmission {
   @IsIn(EVENT_DISCOVERY_SOURCES, {
     message: 'discoverySource must be a supported event discovery source.',
   })

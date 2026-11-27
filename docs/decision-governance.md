@@ -336,3 +336,7 @@ no API/schema/migration changes. See [email design](email-design.md) for the bra
 study, asset availability limitation, rendering matrix and validation method.
 The owner subsequently authorized pushing both auth branches and opening linked
 PRs to main; merging and production cutover remain outside this authorization.
+
+## 27 November 2026 — signup consent and retention
+
+Both signup endpoints require explicit confirmation of age 18 or older and acceptance of privacy and terms version 2. Age confirmation is stored against the person and terms version. Gender, campus branch and skills are required. A single sign-in email is sufficient. The retention scheduler remains disabled pending deployment approval. Its defaults are one year from an application decision, three years from last sign-in, twelve months for audit and auth logs and two years from an event’s end. Apply the audit retention migration and reapply the field-access role grants before enabling the job. Configure the same twelve-month rotation for deployment-managed security logs.

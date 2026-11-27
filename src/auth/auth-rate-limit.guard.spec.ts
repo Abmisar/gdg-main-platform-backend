@@ -2,7 +2,7 @@ import { HttpException } from '@nestjs/common';
 import type { ExecutionContext } from '@nestjs/common';
 import type { ConfigService } from '@nestjs/config';
 import type { PrismaService } from '../prisma/prisma.service.js';
-import { AuthRateLimitGuard, type AuthRateLimitRule } from './auth-rate-limit.guard.js';
+import { AuthRateLimitGuard, PersonRateLimitGuard, type AuthRateLimitRule } from './auth-rate-limit.guard.js';
 
 const queryRaw = vi.fn();
 const getRules = vi.fn();
@@ -72,4 +72,27 @@ describe('AuthRateLimitGuard', () => {
       .resolves.toBe(true);
     expect(queryRaw).not.toHaveBeenCalled();
   });
+});
+
+it('counts IPs before authentication and counts only the authenticated subject in the route guard', async () => {
+  const personGuard = new PersonRateLimitGuard(
+    { $queryRaw: queryRaw } as unknown as PrismaService,
+    { getOrThrow: () => 'synthetic-key' } as unknown as ConfigService,
+    { get: getRules } as never,
+  );
+  getRules.mockReturnValue([
+    { scope: 'rights-submit', dimension: 'ip', limit: 50, windowSeconds: 86400 },
+    { scope: 'rights-submit', dimension: 'person', limit: 5, windowSeconds: 86400 },
+  ]);
+  const request = { headers: {}, ip: '192.0.2.1', body: { personId: 99 } };
+  await guard.canActivate(contextFor(request));
+  await personGuard.canActivate(contextFor(request));
+  expect(queryRaw).toHaveBeenCalledTimes(1);
+  const authenticated = { ...request, user: { personId: 12 } };
+  await personGuard.canActivate(contextFor(authenticated));
+  await personGuard.canActivate(contextFor({ ...authenticated, body: { personId: 100 }, ip: '192.0.2.2' }));
+  await personGuard.canActivate(contextFor({ ...authenticated, user: { personId: 13 } }));
+  const keys = queryRaw.mock.calls.map(call => call[3]);
+  expect(keys[1]).toBe(keys[2]);
+  expect(keys[1]).not.toBe(keys[3]);
 });

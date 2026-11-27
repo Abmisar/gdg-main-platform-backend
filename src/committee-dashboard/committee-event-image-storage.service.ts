@@ -1,7 +1,8 @@
 import { BadGatewayException, BadRequestException, Inject, Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
-import { randomUUID } from 'node:crypto';
+import { AwsClient } from 'aws4fetch';
+import { createHash, randomUUID } from 'node:crypto';
 import { decodeJwt } from 'jose';
 import { IMAGE_TYPES, MAX_IMAGE_BYTES } from '../common/http/image-upload.js';
 
@@ -52,6 +53,40 @@ export class CommitteeEventImageStorageService {
     ) {
       throw new BadRequestException('Choose a JPEG, PNG, WebP, or GIF image up to 5 MB.');
     }
+    const objectName = `${randomUUID()}.${EXTENSION_BY_TYPE[file.mimetype]}`;
+    const objectPath = folder ? `${folder}/${objectName}` : objectName;
+    const endpoint = this.config.get<string>('ASSET_S3_ENDPOINT');
+    if (endpoint) {
+      try {
+        const url = new URL(endpoint);
+        if (url.protocol !== 'https:' && process.env.NODE_ENV === 'production') throw new Error();
+        const bucket = this.config.getOrThrow<string>('ASSET_BUCKET');
+        url.pathname = `/${encodeURIComponent(bucket)}/${objectPath}`;
+        const signer = new AwsClient({
+          accessKeyId: this.config.getOrThrow<string>('ASSET_S3_KEY'),
+          secretAccessKey: this.config.getOrThrow<string>('ASSET_S3_SECRET'),
+          region: 'me-jeddah-1',
+          service: 's3',
+        });
+        const response = await signer.fetch(url.href, {
+          method: 'PUT',
+          aws: { allHeaders: true },
+          headers: {
+            'Content-Type': file.mimetype,
+            'Cache-Control': 'public, max-age=31536000',
+            'X-Amz-Content-Sha256': createHash('sha256').update(file.buffer).digest('hex'),
+          },
+          body: new Uint8Array(file.buffer),
+          redirect: 'error',
+        });
+        if (!response.ok) throw new Error();
+        const base = this.config.getOrThrow<string>('ASSET_PUBLIC_BASE').replace(/\/$/, '');
+        return { imageUrl: `${base}/${objectPath}` };
+      } catch {
+        this.logger.error({ event: 'event_image_storage_failed', operation: 'upload' });
+        throw new BadGatewayException('The event image could not be stored.');
+      }
+    }
     const bucketId = this.config.get<string>('SUPABASE_ASSET_BUCKET') ?? 'event-images';
     if (!/^[a-z0-9][a-z0-9-]{0,62}$/.test(bucketId)) {
       throw new BadGatewayException('Event image storage is unavailable.');
@@ -69,8 +104,6 @@ export class CommitteeEventImageStorageService {
       this.logger.error({ event: 'event_image_storage_failed', operation: 'check_bucket' });
       throw new BadGatewayException('Event image storage is unavailable.');
     }
-    const objectName = `${randomUUID()}.${EXTENSION_BY_TYPE[file.mimetype]}`;
-    const objectPath = folder ? `${folder}/${objectName}` : objectName;
     const { error } = await client.storage.from(bucketId).upload(objectPath, file.buffer, {
       contentType: file.mimetype,
       cacheControl: '31536000',
