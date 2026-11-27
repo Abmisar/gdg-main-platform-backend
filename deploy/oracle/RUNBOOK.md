@@ -1,5 +1,7 @@
 # GDG on Campus UJ on Oracle ARM
 
+For the staged Jeddah PostgreSQL and Object Storage deployment, use [KSA-MIGRATION.md](KSA-MIGRATION.md) for database, bucket, credential, backup and rollback configuration. The Supabase/R2 instructions below describe the preceding deployment.
+
 The backend repository owns this kit. One Nest process runs the in-process schedulers, including the 15-second email poll. Next serves the public site and rewrites browser requests under /api to the public HTTPS API. Cloudflared reaches both by container name on an internal Docker network. An additional bridge provides outbound connectivity for the tunnel, API integrations and Next.js HTTPS rewrites. Supabase and Resend remain the production services.
 
 ## Provision the account and host

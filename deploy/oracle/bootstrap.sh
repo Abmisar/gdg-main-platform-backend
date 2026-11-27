@@ -5,7 +5,7 @@ test -s /home/ubuntu/.ssh/authorized_keys
 admin_cidr=${1:?pass administrator CIDR}
 python3 -c 'import ipaddress,sys; ipaddress.ip_network(sys.argv[1])' "$admin_cidr"
 apt-get update
-DEBIAN_FRONTEND=noninteractive apt-get install -y age git dbus-user-session ufw fail2ban unattended-upgrades python3-boto3 postgresql-client curl ca-certificates
+DEBIAN_FRONTEND=noninteractive apt-get install -y age git dbus-user-session ufw fail2ban unattended-upgrades python3-boto3 python3-psycopg python3-cryptography postgresql-client curl ca-certificates
 test "$(dpkg --print-architecture)" = arm64
 install -d -m 0755 /etc/apt/keyrings
 curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc
