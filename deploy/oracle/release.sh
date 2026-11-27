@@ -48,6 +48,7 @@ case $revision in
     fi
     compose "$candidate" config --format json | python3 -c 'import json,sys; sys.exit(json.load(sys.stdin)["services"]["backend"]["environment"].get("SCHEDULERS_ENABLED") != sys.argv[1])' "$expected"
     compose "$candidate" run --rm --no-deps --env-from-file "$(config_dir "$candidate")/migration.env" backend ./node_modules/.bin/prisma migrate status --config prisma7.config.ts
+    if [[ -f "$candidate/pitr-ops.py" ]]; then python3 "$candidate/pitr-ops.py" check; fi
     activate "$candidate"
     if [[ $revision == activate && $current != "$candidate" ]]; then
       if [[ -f "$current/tags.env" ]]; then point previous "$current"; fi
@@ -58,6 +59,11 @@ case $revision in
       install -m 644 "$candidate/gdg-backup-jeddah.service" "$HOME/.config/systemd/user/gdg-backup.service"
       systemctl --user daemon-reload
       systemctl --user enable --now gdg-backup.timer
+      if [[ -f "$candidate/pitr-ops.py" ]]; then
+        install -m 644 "$candidate/"gdg-pitr-* "$HOME/.config/systemd/user/"
+        systemctl --user daemon-reload
+        systemctl --user enable --now gdg-pitr-backup.timer gdg-pitr-check.timer
+      fi
     fi
     exit
     ;;
@@ -71,7 +77,7 @@ else
   if [[ $target == prod && ( -f "$GDG_CONFIG/prepare-jeddah" || -f "$current/images" ) ]]; then
     regional=true
     export GDG_CONFIG="$GDG_CONFIG/jeddah"
-    templates=(backend.jeddah frontend network postgres backup.jeddah migration)
+    templates=(backend.jeddah frontend network postgres backup.jeddah pitr.jeddah migration)
   fi
   for name in "${templates[@]}"; do
     file="$GDG_CONFIG/${name%%.*}.env"
@@ -132,8 +138,8 @@ PYCONFIG
   if $regional; then
     cp compose.jeddah.yml "$candidate/compose.yml"
     cp init-postgres.sh snapshot-run.sh gdg-backup-jeddah.service "$candidate/"
-    compose "$candidate" pull postgres
-    compose "$candidate" build --pull backup
+    cp pitr-ops.py systemd/gdg-pitr-* "$candidate/"
+    compose "$candidate" build --pull postgres backup
   fi
   compose "$candidate" config --quiet
   for app in backend frontend; do compose "$candidate" build --pull "$app"; done

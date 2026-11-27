@@ -1,0 +1,12 @@
+services:
+  recovery:
+    image: gdg-postgres:${RELEASE_TAG:?release tag required}
+    user: postgres
+    env_file:
+      - path: ${GDG_RECOVERY_CONFIG:?isolated configuration required}/pitr.env
+        format: raw
+    volumes:
+      - recovered:/var/lib/postgresql
+    command: [postgres, -c, archive_mode=off, -c, listen_addresses=]
+volumes:
+  recovered: {}

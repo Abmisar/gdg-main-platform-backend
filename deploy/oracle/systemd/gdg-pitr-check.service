@@ -1,0 +1,8 @@
+[Unit]
+OnFailure=gdg-pitr-alert.service
+Description=GDG PostgreSQL PITR check
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 %h/.local/state/gdg/prod/current/pitr-ops.py check
+UMask=0077

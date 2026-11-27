@@ -12,19 +12,24 @@ x-runtime: &runtime
 
 services:
   postgres:
-    image: postgres:18-bookworm@sha256:e742a2668255221388004f3a42b6150a2103f5054ab3a4a93ae9e4f01e551c35
+    image: gdg-postgres:${RELEASE_TAG:?release tag required}
+    build:
+      context: ${BACKEND_SOURCE:-${HOME}/backend}/deploy/oracle
+      dockerfile: Dockerfile.postgres
     platform: linux/arm64
     restart: unless-stopped
     env_file:
       - path: ${GDG_CONFIG:-${HOME}/.config/gdg}/postgres.env
         format: raw
+      - path: ${GDG_CONFIG:-${HOME}/.config/gdg}/pitr.env
+        format: raw
     environment:
       POSTGRES_DB: gdg
       POSTGRES_INITDB_ARGS: --auth-host=scram-sha-256
-    command: [postgres, -c, shared_buffers=512MB, -c, work_mem=4MB, -c, maintenance_work_mem=128MB, -c, max_connections=60]
+    command: [postgres, -c, shared_buffers=512MB, -c, work_mem=4MB, -c, maintenance_work_mem=128MB, -c, max_connections=60, -c, archive_mode=on, -c, archive_timeout=300s, -c, "archive_command=pgbackrest --stanza=gdg archive-push %p"]
     mem_limit: 3g
     shm_size: 256m
-    networks: [database]
+    networks: [database, archive_egress]
     volumes:
       - pgdata:/var/lib/postgresql
       - ./init-postgres.sh:/docker-entrypoint-initdb.d/10-roles.sh:ro
@@ -122,6 +127,7 @@ networks:
   app:
     external: true
     name: ${COMPOSE_PROJECT_NAME}-app
+  archive_egress: {}
   backup_egress: {}
   backend_egress: {}
   frontend_egress: {}

@@ -340,3 +340,7 @@ PRs to main; merging and production cutover remain outside this authorization.
 ## 27 November 2026 — signup consent and retention
 
 Both signup endpoints require explicit confirmation of age 18 or older and acceptance of privacy and terms version 2. Age confirmation is stored against the person and terms version. Gender, campus branch and skills are required. A single sign-in email is sufficient. The retention scheduler remains disabled pending deployment approval. Its defaults are one year from an application decision, three years from last sign-in, twelve months for audit and auth logs and two years from an event’s end. Apply the audit retention migration and reapply the field-access role grants before enabling the job. Configure the same twelve-month rotation for deployment-managed security logs.
+
+## 2026-11-27 Jeddah physical backups
+
+The owner requested continuous encrypted recovery for the planned self-hosted PostgreSQL deployment. The backend deployment proposal uses pgBackRest for client-side encryption, WAL and base-backup retention under one policy. Activation requires an initial recoverable base backup. Supabase Free continues using nightly logical snapshots. Keep those independent snapshots after cutover and preserve the original repository and passphrase through any rollback. Owner provisioning and operational acceptance are pending. [Deployment and recovery procedure](../deploy/oracle/PITR.md)

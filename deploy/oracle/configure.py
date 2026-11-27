@@ -12,7 +12,7 @@ def main():
     if target not in {"dev", "prod"} or target == "dev" and name not in {"frontend", "backend", "network", "migration"}:
         raise ValueError("Unknown target or service")
     template = Path(__file__).parent / "env" / (name + ".env.example")
-    if name not in {"frontend", "backend", "tunnel", "backup", "restore", "network", "postgres", "migration", "backend.jeddah", "backup.jeddah", "restore.jeddah"}:
+    if name not in {"frontend", "backend", "tunnel", "backup", "restore", "network", "postgres", "migration", "backend.jeddah", "backup.jeddah", "restore.jeddah", "pitr.jeddah"}:
         raise ValueError("Unknown environment")
     directory = Path.home() / ".config" / "gdg" / target
     if name.endswith(".jeddah") or name == "postgres":
