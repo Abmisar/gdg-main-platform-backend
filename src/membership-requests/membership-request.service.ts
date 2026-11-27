@@ -1,10 +1,8 @@
 import type { ConsentEvidence } from '../data-rights/consent.js';
-import { randomUUID } from 'node:crypto';
 import {
   ConflictException,
   ForbiddenException,
   Inject,
-  Logger,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
@@ -25,7 +23,6 @@ import type {
   CreateMembershipRequestDto,
   DecideMembershipRequestDto,
 } from './membership-request.dto.js';
-import { MembershipRequestEmailService } from './membership-request-email.service.js';
 
 export const APPLICATIONS_DECIDE = 'applications.decide';
 const DEVELOPER_LEADERS_DECIDE = 'applications.developer_leaders.decide';
@@ -36,6 +33,13 @@ type ScopedRequest = {
   requestedRole: string;
 };
 type Reader = Pick<Prisma.TransactionClient, 'committee'>;
+
+const committeeApplicant = {
+  membershipRequestId: true,
+  createdAt: true,
+  applicationData: true,
+  person: { select: { fullName: true } },
+} as const;
 
 const requestInclude = {
   person: {
@@ -58,14 +62,12 @@ const requestInclude = {
 
 @Injectable()
 export class MembershipRequestService {
-  private readonly logger = new Logger(MembershipRequestService.name);
+
 
   constructor(
     @Inject(PrismaService) private readonly prisma: PrismaService,
     @Inject(CommitteeAccessService)
     private readonly access: CommitteeAccessService,
-    @Inject(MembershipRequestEmailService)
-    private readonly emails?: MembershipRequestEmailService,
   ) {}
 
   async create(user: AuthenticatedUser, body: CreateMembershipRequestDto, evidence: ConsentEvidence) {
@@ -148,18 +150,11 @@ export class MembershipRequestService {
         { membershipRequestCommitteeId: 'asc' },
       ],
       include: {
-        membershipRequest: { include: requestInclude },
+        membershipRequest: { select: committeeApplicant },
+        committee: { select: { committeeName: true } },
       },
     });
-    return rows.map((row) => ({
-      ...this.serialize(row.membershipRequest),
-      committeeDecision: {
-        committeeCode,
-        status: row.status,
-        requestedRole: row.requestedRole,
-        decidedAt: row.decidedAt,
-      },
-    }));
+    return rows.map(row => this.committeeView(row.membershipRequest, committeeCode, row));
   }
 
   async decide(
@@ -236,11 +231,12 @@ export class MembershipRequestService {
         });
       }
 
-      await tx.membershipRequestCommittee.update({
+      const ownDecision = await tx.membershipRequestCommittee.update({
         where: {
           membershipRequestCommitteeId:
             application.membershipRequestCommitteeId,
         },
+        include: { committee: { select: { committeeName: true } } },
         data: {
           status: decision,
           decidedByMemberId: actorMemberId,
@@ -252,39 +248,12 @@ export class MembershipRequestService {
 
       const updated = await tx.membershipRequest.findUniqueOrThrow({
         where: { membershipRequestId: requestId },
-        include: requestInclude,
+        select: committeeApplicant,
       });
-      const ownDecision = updated.committees.find(
-        (row) => row.committeeId === committee.committeeId,
-      )!;
-      return {
-        response: {
-          ...this.serialize(updated),
-          committeeDecision: {
-            committeeCode,
-            status: ownDecision.status,
-            requestedRole: ownDecision.requestedRole,
-            decidedAt: ownDecision.decidedAt,
-          },
-        },
-        email: {
-          updated,
-          committeeName: ownDecision.committee.committeeName,
-          requestedRole: ownDecision.requestedRole,
-          status: ownDecision.status,
-        },
-      };
+      await tx.membershipDecisionDelivery.create({ data: { committeeId: application.membershipRequestCommitteeId } });
+      return this.committeeView(updated, committeeCode, ownDecision);
     });
-    this.dispatchDecisionEmail(
-      () =>
-        this.sendCommitteeDecisionEmail(
-          outcome.email.updated,
-          outcome.email.committeeName,
-          outcome.email.requestedRole,
-          outcome.email.status,
-        ),
-    );
-    return outcome.response;
+    return outcome;
   }
 
   async listLeadership(
@@ -410,29 +379,10 @@ export class MembershipRequestService {
         },
       });
       await this.refreshAggregateStatus(tx, requestId);
-      const updated = await tx.membershipRequest.findUniqueOrThrow({
-        where: { membershipRequestId: requestId },
-        include: requestInclude,
-      });
-      return {
-        response: { id: row.membershipRequestId, committeeCode, decision },
-        email: {
-          request: updated,
-          committeeName: row.committee?.committeeName ?? committeeCode,
-          requestedRole: row.requestedRole,
-        },
-      };
+      await tx.membershipDecisionDelivery.create({ data: { committeeId: row.membershipRequestCommitteeId } });
+      return { id: row.membershipRequestId, committeeCode, decision };
     }, { maxWait: 10_000, timeout: 15_000 });
-    this.dispatchDecisionEmail(
-      () =>
-        this.sendCommitteeDecisionEmail(
-          outcome.email.request,
-          outcome.email.committeeName,
-          outcome.email.requestedRole,
-          decision,
-        ),
-    );
-    return outcome.response;
+    return outcome;
   }
 
   async decideGlobalRole(
@@ -490,25 +440,10 @@ export class MembershipRequestService {
         },
       });
       await this.refreshAggregateStatus(tx, requestId);
-      const updated = await tx.membershipRequest.findUniqueOrThrow({
-        where: { membershipRequestId: requestId },
-        include: requestInclude,
-      });
-      const roleName = row.role?.description ?? row.roleCode;
-      return {
-        response: { id: row.membershipRequestId, roleCode, decision },
-        email: { request: updated, roleName },
-      };
+      await tx.membershipDecisionDelivery.create({ data: { globalId: row.membershipRequestGlobalRoleId } });
+      return { id: row.membershipRequestId, roleCode, decision };
     });
-    this.dispatchDecisionEmail(
-      () =>
-        this.sendGlobalRoleDecisionEmail(
-          outcome.email.request,
-          outcome.email.roleName,
-          decision,
-        ),
-    );
-    return outcome.response;
+    return outcome;
   }
 
   private async assertCanDecide(memberId: number, committeeCode: string) {
@@ -606,68 +541,25 @@ export class MembershipRequestService {
     });
   }
 
-  private dispatchDecisionEmail(send: () => Promise<void>) {
-    void Promise.resolve()
-      .then(send)
-      .catch(() => this.logger.error({ event: 'membership_decision_email_dispatch_failed' }));
-  }
-  private async sendCommitteeDecisionEmail(
-    request: {
-      person?: {
-        emailPersonal?: string | null;
-        emailUniversity?: string | null;
-      };
-    },
-    committeeName: string,
-    requestedRole: string,
-    decision: MembershipCommitteeDecision,
+  private committeeView(
+    request: { membershipRequestId: number; createdAt: Date; applicationData: unknown; person: { fullName: string } },
+    committeeCode: string,
+    row: { status: MembershipCommitteeDecision; requestedRole: string; decidedAt: Date | null; committee: { committeeName: string } },
   ) {
-    const person = request.person;
-    if (!this.emails || !person) return;
-    const to = person.emailPersonal ?? person.emailUniversity ?? null;
-    if (!to) return;
-    try {
-      await this.emails.sendDecisionEmail({
-        to,
-        decision:
-          decision === MembershipCommitteeDecision.APPROVED
-            ? 'APPROVED'
-            : 'REJECTED',
-        committeeName,
-        roleName: requestedRole,
-      });
-    } catch {
-      this.logger.error({ event: 'membership_decision_email_failed', deliveryId: randomUUID() });
-    }
-  }
-
-  private async sendGlobalRoleDecisionEmail(
-    request: {
-      person?: {
-        emailPersonal?: string | null;
-        emailUniversity?: string | null;
-      };
-    },
-    roleName: string,
-    decision: MembershipCommitteeDecision,
-  ) {
-    const person = request.person;
-    if (!this.emails || !person) return;
-    const to = person.emailPersonal ?? person.emailUniversity ?? null;
-    if (!to) return;
-    try {
-      await this.emails.sendDecisionEmail({
-        to,
-        decision:
-          decision === MembershipCommitteeDecision.APPROVED
-            ? 'APPROVED'
-            : 'REJECTED',
-        globalRoleName: roleName,
-        roleName,
-      });
-    } catch {
-      this.logger.error({ event: 'membership_decision_email_failed', deliveryId: randomUUID() });
-    }
+    const details = request.applicationData as { skillsByCommittee?: Record<string, unknown> } | null;
+    const skills = details?.skillsByCommittee?.[committeeCode];
+    const decision = { status: row.status, requestedRole: row.requestedRole, decidedAt: row.decidedAt };
+    return {
+      id: request.membershipRequestId,
+      submittedAt: request.createdAt,
+      status: row.status,
+      applicant: {
+        fullName: request.person.fullName,
+        details: { skillsByCommittee: { [committeeCode]: Array.isArray(skills) ? skills.filter(value => typeof value === 'string') : [] } },
+      },
+      committees: [{ code: committeeCode, name: row.committee.committeeName, ...decision }],
+      committeeDecision: { committeeCode, ...decision },
+    };
   }
 
   private serialize(request: {
