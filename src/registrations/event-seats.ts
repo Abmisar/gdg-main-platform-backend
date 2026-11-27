@@ -88,7 +88,7 @@ export function countHeldSeats(tx: Tx, eventId: number) {
 // The fields for offering a seat, or null once the event has started.
 // The deadline is the event's window from now, capped at the event start.
 export function seatOffer(event: LockedEvent, now = new Date()) {
-  if (event.startsAt.getTime() <= now.getTime()) return null;
+  if (!event.published || event.startsAt.getTime() <= now.getTime()) return null;
   const windowEnd = now.getTime() + event.confirmationWindowHours * HOUR_MS;
   return {
     status: RegistrationStatus.AWAITING_CONFIRMATION,
