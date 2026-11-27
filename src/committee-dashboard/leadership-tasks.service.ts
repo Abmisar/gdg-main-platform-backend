@@ -1,3 +1,4 @@
+import { parseRiyadhDateTime } from './riyadh-date-time.js';
 import { directoryOrder } from './directory-order.js';
 import { BadRequestException, ConflictException, ForbiddenException, Inject, Injectable, NotFoundException } from '@nestjs/common';
 import { EventStatus } from '../generated/prisma/client.js';
@@ -230,7 +231,7 @@ export class LeadershipTasksService {
     const task = await this.prisma.committeeTask.create({
       data: {
         committeeId: target.committeeId, title, description: dto.description?.trim() ?? '',
-        assignedMemberId: dto.assignedMemberId, createdByMemberId: actorId, dueAt: new Date(dto.dueAt),
+        assignedMemberId: dto.assignedMemberId, createdByMemberId: actorId, dueAt: parseRiyadhDateTime(dto.dueAt),
         priority: dto.priority, status: CommitteeTaskStatus.TODO, taskScope: scope, eventId: eventId ?? null,
       },
       include: { assignee: { include: { person: true } }, committee: { select: { committeeCode: true, committeeName: true } }, event: { select: { name: true } } },
@@ -270,7 +271,7 @@ export class LeadershipTasksService {
         ...(dto.title !== undefined ? { title: dto.title.trim() } : {}),
         ...(dto.description !== undefined ? { description: dto.description.trim() } : {}),
         assignedMemberId: requestedMemberId,
-        ...(dto.dueAt !== undefined ? { dueAt: new Date(dto.dueAt) } : {}),
+        ...(dto.dueAt !== undefined ? { dueAt: parseRiyadhDateTime(dto.dueAt) } : {}),
         ...(dto.priority !== undefined ? { priority: dto.priority } : {}),
         ...(dto.status !== undefined ? { status: dto.status } : {}),
       },
