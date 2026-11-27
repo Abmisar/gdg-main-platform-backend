@@ -22,6 +22,7 @@ ENV NODE_ENV=production
 ENV PORT=3001
 COPY --from=production-dependencies /app/node_modules ./node_modules
 COPY --from=builder /app/dist ./dist
-COPY package.json ./package.json
+COPY prisma ./prisma
+COPY prisma7.config.ts package.json ./
 EXPOSE 3001
 CMD ["node", "dist/main"]

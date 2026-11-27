@@ -88,6 +88,7 @@ PYCONFIG
   for app in backend frontend; do compose "$candidate" build --pull "$app"; done
 
 fi
+compose "$candidate" run --rm --no-deps --env-from-file "$GDG_CONFIG/migration.env" backend ./node_modules/.bin/prisma migrate status --config prisma7.config.ts
 if ! activate "$candidate"; then
   if [[ -f "$current/tags.env" ]]; then
     echo 'Activation failed. Restoring the last healthy release.' >&2

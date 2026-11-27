@@ -43,7 +43,7 @@ export class HealthController {
   @Get('ready')
   async ready() {
     try {
-      await this.prisma.checkDatabaseConnection();
+      await this.prisma.event.findFirst({ select: { eventId: true, confirmationWindowHours: true } });
       return { status: 'ready' };
     } catch (error) {
       this.logger.warn({

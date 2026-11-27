@@ -60,6 +60,8 @@ systemctl --user enable --now gdg-backup.timer
 
 ## Deploy, verify and roll back
 
+Provide a mode-0600 migration.env beside backend.env containing DATABASE_URL for the migration-status connection. Apply approved migrations separately. The candidate must pass Prisma migration status before activation. Readiness selects the event ID and confirmation window.
+
 Set SECURITY_ALERT_EMAIL to the monitored security role inbox. Verify report-read alert delivery using a synthetic event and record the receipt.
 
 A main push runs the repo's tests and image build, without deploying. In Actions → Build and deploy backend image (or frontend image) → Run workflow, choose main and select dev or production. Review the run's SHA and the companion SHA in the current production release before approving the production environment. Schedule production requests one at a time so the approved companion remains current. The VM serializes releases across projects, checks main ancestry, builds both ARM images from pinned Git archives and activates them with a health deadline. A stale dev push is skipped. The projects use separate env files, images, networks and release history. Dev caps each app at 0.5 CPU and 768 MiB. Production caps each at 1.5 CPU and 2 GiB. Loopback frontend/API ports are 13000/13001 for dev and 3000/3001 for prod.
