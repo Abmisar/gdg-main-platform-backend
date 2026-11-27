@@ -108,7 +108,7 @@ Google OAuth callback to register: `https://gdguj.org/api/auth/callback/google`.
 ## Remaining steps
 
 1. Create the scoped R2 token.
-2. Follow the RUNBOOK release gates. Each main push deploys to gdg-dev using the gdgoc-uj-dev Supabase project. Both dev hostnames require Cloudflare Access. Production uses gdg-prod and requires a manual dispatch plus the owner’s environment approval.
+2. Follow the RUNBOOK release gates. A manual dev dispatch deploys to gdg-dev using the gdgoc-uj-dev Supabase project. Both dev hostnames require Cloudflare Access. Production uses gdg-prod and requires a manual dispatch plus the owner’s environment approval.
 3. Verify readiness, sign-in, email delivery and the first R2 snapshot.
 4. Measure memory use and decide on the idle-reclaim resize.
 5. Add the `www` to apex redirect and UptimeRobot checks for the frontend and API readiness.
