@@ -334,7 +334,8 @@ export class EventRegistrationService {
         data: { status: RegistrationStatus.DECLINED },
       });
       if (offered.count === 1) {
-        return { status: RegistrationStatus.DECLINED, releasedSeat: true };
+        await this.review.promoteWithin(tx, event);
+        return RegistrationStatus.DECLINED;
       }
 
       const waitlisted = await tx.eventRegistration.updateMany({
@@ -343,7 +344,7 @@ export class EventRegistrationService {
       });
       if (waitlisted.count === 1) {
         await renumberWaitlist(tx, eventId);
-        return { status: RegistrationStatus.DECLINED, releasedSeat: false };
+        return RegistrationStatus.DECLINED;
       }
 
       if (now.getTime() < event.startsAt.getTime()) {
@@ -370,16 +371,19 @@ export class EventRegistrationService {
               skipDuplicates: true,
             });
           }
-          return { status, releasedSeat: true };
+          await this.review.promoteWithin(tx, event);
+          return status;
         }
       }
-      throw this.cannotRespond(registration);
+      const prior = await tx.eventRegistration.findUniqueOrThrow({
+        where: { registrationId }, select: { status: true, confirmedAt: true, confirmationDeadline: true },
+      });
+      if (prior.status === RegistrationStatus.DECLINED || prior.status === RegistrationStatus.LATE_CANCELLATION ||
+        (prior.status === RegistrationStatus.CANCELLED && prior.confirmedAt !== null)) return prior.status;
+      throw this.cannotRespond(prior);
     });
 
-    if (outcome.releasedSeat) {
-      await this.review.promoteNextFromWaitlist(eventId);
-    }
-    return { registrationId, status: outcome.status };
+    return { registrationId, status: outcome };
   }
 
   private async ownRegistration(registrationId: number, personId: number) {

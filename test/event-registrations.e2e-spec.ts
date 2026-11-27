@@ -338,6 +338,20 @@ describe('confirming and declining a seat', () => {
     expect((await statusOf(registrationId)).status).toBe(RegistrationStatus.AWAITING_CONFIRMATION);
   });
 
+  it('rolls back withdrawal when promotion fails', async () => {
+    const { event, person, registrationId } = await offeredSeat(1);
+    const waiting = await registerVia(event.eventId, await createPerson());
+    await review.setWaitlist(event.eventId, [waiting], prMemberId);
+    const failure = vi.spyOn(review, 'promoteWithin').mockRejectedValueOnce(new Error('promotion failed'));
+    try {
+      await as(person).post(`/registrations/${registrationId}/decline`).expect(500);
+      expect((await statusOf(registrationId)).status).toBe(RegistrationStatus.AWAITING_CONFIRMATION);
+      expect((await statusOf(waiting)).status).toBe(RegistrationStatus.WAITLISTED);
+    } finally {
+      failure.mockRestore();
+    }
+  });
+
   it('declining an offered seat promotes waitlist #1', async () => {
     const { event, person, registrationId } = await offeredSeat(1);
     const w1 = await registerVia(event.eventId, await createPerson());
@@ -348,6 +362,7 @@ describe('confirming and declining a seat', () => {
       .post(`/registrations/${registrationId}/decline`)
       .expect(200);
 
+    await as(person).post(`/registrations/${registrationId}/decline`).expect(200);
     expect((await statusOf(registrationId)).status).toBe(
       RegistrationStatus.DECLINED,
     );

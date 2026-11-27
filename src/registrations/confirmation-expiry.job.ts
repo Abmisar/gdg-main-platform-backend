@@ -21,9 +21,14 @@ export class ConfirmationExpiryJob {
     if (this.running) return;
     this.running = true;
     try {
-      const { cancelled, promoted } =
-        await this.reviewService.cancelOverdueConfirmationOffers();
-      const { marked } = await this.reviewService.markOverdueNoShows();
+      const [offers, noShows] = await Promise.allSettled([
+        this.reviewService.cancelOverdueConfirmationOffers(),
+        this.reviewService.markOverdueNoShows(),
+      ]);
+      if (offers.status === 'rejected') throw offers.reason;
+      if (noShows.status === 'rejected') throw noShows.reason;
+      const { cancelled, promoted } = offers.value;
+      const { marked } = noShows.value;
       if (cancelled > 0) {
         this.logger.log({
           event: 'registration_confirmation_offers_cancelled',

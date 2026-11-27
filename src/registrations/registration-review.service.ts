@@ -1,4 +1,4 @@
-import { Inject, Injectable } from '@nestjs/common';
+import { Inject, Injectable, Logger } from '@nestjs/common';
 import {
   BlacklistReason,
   EventStatus,
@@ -12,6 +12,7 @@ import {
 import {
   countHeldSeats,
   eventStarted,
+  eventNotFound,
   inEventTransaction,
   type LockedEvent,
   lockEvent,
@@ -38,6 +39,9 @@ const NO_SHOW_GRACE_PERIOD_MS = 24 * 60 * 60 * 1000;
 
 @Injectable()
 export class RegistrationReviewService {
+  private expiryCursor = 0;
+  private readonly logger = new Logger(RegistrationReviewService.name);
+
   constructor(
     @Inject(PrismaService) private readonly prisma: PrismaService,
     @Inject(CommitteeAccessService)
@@ -73,6 +77,7 @@ export class RegistrationReviewService {
 
         let updated;
         if (decision === 'ACCEPT') {
+          if (!event.published) throw eventNotFound();
           const offer = seatOffer(event);
           if (!offer) throw eventStarted();
           if ((await countHeldSeats(tx, event.eventId)) >= event.capacity) {
@@ -197,35 +202,49 @@ export class RegistrationReviewService {
   // each freed seat from the waitlist. Safe to run concurrently: a row only
   // expires if it is still awaiting confirmation once the event is locked.
   async cancelOverdueConfirmationOffers(now = new Date()) {
-    const overdue = await this.prisma.eventRegistration.findMany({
-      where: {
-        status: RegistrationStatus.AWAITING_CONFIRMATION,
-        confirmationDeadline: { lt: now },
-      },
-      select: { registrationId: true, eventId: true },
+    const where = {
+      status: RegistrationStatus.AWAITING_CONFIRMATION,
+      confirmationDeadline: { lt: now },
+    };
+    const oldest = await this.prisma.eventRegistration.findFirst({
+      where,
       orderBy: { confirmationDeadline: 'asc' },
+      select: { confirmationDeadline: true },
     });
+    const overdue = await this.prisma.eventRegistration.findMany({
+      where: { ...where, registrationId: { gt: this.expiryCursor } },
+      select: { registrationId: true, eventId: true },
+      orderBy: { registrationId: 'asc' },
+      take: 100,
+    });
+    this.expiryCursor = overdue.length === 100 ? overdue[99].registrationId : 0;
+    const oldestAgeMs = oldest?.confirmationDeadline ? now.getTime() - oldest.confirmationDeadline.getTime() : 0;
+    this.logger.log({ event: 'registration_expiry_backlog', oldestAgeMs, batchSize: overdue.length });
 
     let cancelled = 0;
     const promoted: number[] = [];
     for (const { registrationId, eventId } of overdue) {
-      const outcome = await inEventTransaction(this.prisma, async (tx) => {
-        const event = await lockEvent(tx, eventId);
-        const { count } = await tx.eventRegistration.updateMany({
-          where: {
-            registrationId,
-            status: RegistrationStatus.AWAITING_CONFIRMATION,
-            confirmationDeadline: { lt: now },
-          },
-          data: { status: RegistrationStatus.CANCELLED, cancelledAt: now },
+      try {
+        const outcome = await inEventTransaction(this.prisma, async (tx) => {
+          const event = await lockEvent(tx, eventId);
+          const { count } = await tx.eventRegistration.updateMany({
+            where: {
+              registrationId,
+              status: RegistrationStatus.AWAITING_CONFIRMATION,
+              confirmationDeadline: { lt: now },
+            },
+            data: { status: RegistrationStatus.CANCELLED, cancelledAt: now },
+          });
+          if (count === 0) return null;
+          // A missed confirmation cancels the offer, releases its seat and is not a blacklist incident.
+          return { promotedId: await this.promoteWithin(tx, event) };
         });
-        if (count === 0) return null;
-        // A missed confirmation cancels the offer, releases its seat and is not a blacklist incident.
-        return { promotedId: await this.promoteWithin(tx, event) };
-      });
-      if (!outcome) continue;
-      cancelled += 1;
-      if (outcome.promotedId !== null) promoted.push(outcome.promotedId);
+        if (!outcome) continue;
+        cancelled += 1;
+        if (outcome.promotedId !== null) promoted.push(outcome.promotedId);
+      } catch {
+        this.logger.error({ event: 'registration_offer_expiry_failed', registrationId, eventId });
+      }
     }
     return { cancelled, promoted };
   }
@@ -287,7 +306,7 @@ export class RegistrationReviewService {
     return { marked };
   }
 
-  private async promoteWithin(
+  async promoteWithin(
     tx: Tx,
     event: LockedEvent,
   ): Promise<number | null> {
