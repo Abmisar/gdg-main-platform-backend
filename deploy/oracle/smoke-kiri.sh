@@ -68,5 +68,9 @@ done
 network_created=true
 launched=true
 "${c[@]}" up -d --wait db
+prisma=("${c[@]}" run --rm --no-deps backend ./node_modules/.bin/prisma migrate)
+if "${prisma[@]}" status --config prisma7.config.ts; then exit 1; fi
+"${prisma[@]}" deploy --config prisma7.config.ts
+"${prisma[@]}" status --config prisma7.config.ts
 "${c[@]}" up -d --wait --wait-timeout 180 --no-build --pull never backend frontend
 "${c[@]}" ps

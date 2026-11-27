@@ -1,13 +1,12 @@
-import { ServiceUnavailableException } from '@nestjs/common';
 import { expect, it, vi } from 'vitest';
-import type { PrismaService } from '../prisma/prisma.service.js';
 import { HealthController } from './health.controller.js';
 
-it('reports process and database health independently', async () => {
-  const checkDatabaseConnection = vi.fn().mockResolvedValueOnce(undefined).mockRejectedValueOnce(new Error('fixture'));
-  const health = new HealthController({ checkDatabaseConnection } as unknown as PrismaService);
-  expect(health.live()).toEqual({ status: 'ok' });
-  expect(checkDatabaseConnection).not.toHaveBeenCalled();
-  await expect(health.ready()).resolves.toEqual({ status: 'ready' });
-  await expect(health.ready()).rejects.toBeInstanceOf(ServiceUnavailableException);
+it('requires the application event projection even on an empty database', async () => {
+  const findFirst = vi.fn().mockResolvedValueOnce(null).mockRejectedValueOnce(new Error('missing column'));
+  const controller = new HealthController({ event: { findFirst } } as never);
+  expect(controller.live()).toEqual({ status: 'ok' });
+  expect(findFirst).not.toHaveBeenCalled();
+  await expect(controller.ready()).resolves.toEqual({ status: 'ready' });
+  expect(findFirst).toHaveBeenCalledWith({ select: { eventId: true, confirmationWindowHours: true } });
+  await expect(controller.ready()).rejects.toThrow();
 });
