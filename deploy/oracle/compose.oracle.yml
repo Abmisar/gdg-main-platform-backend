@@ -15,12 +15,15 @@ services:
     <<: *runtime
     networks:
       app:
-        aliases: [gdg-backend]
+        aliases: [gdg-backend, "${COMPOSE_PROJECT_NAME}-backend"]
       backend_egress:
         gw_priority: 1
     environment:
       TRUSTED_CF_PROXY_IPS: ${APP_NETWORK_PREFIX:?network prefix required}.2,${APP_NETWORK_PREFIX}.3
-    container_name: gdg-backend
+    ports:
+      - "127.0.0.1:${BACKEND_PORT}:3001"
+    cpus: ${APP_CPUS}
+    mem_limit: ${APP_MEMORY}
     image: gdg-backend:${RELEASE_TAG:?release tag required}
     build:
       context: ${BACKEND_SOURCE:-${HOME}/backend}
@@ -38,6 +41,10 @@ services:
       retries: 3
   frontend:
     <<: *runtime
+    ports:
+      - "127.0.0.1:${FRONTEND_PORT}:3000"
+    cpus: ${APP_CPUS}
+    mem_limit: ${APP_MEMORY}
     image: gdg-frontend:${RELEASE_TAG:?release tag required}
     build:
       context: ${FRONTEND_SOURCE:-${HOME}/frontend}
@@ -52,7 +59,7 @@ services:
         format: raw
     networks:
       app:
-        aliases: [gdg-frontend]
+        aliases: [gdg-frontend, "${COMPOSE_PROJECT_NAME}-frontend"]
         ipv4_address: ${APP_NETWORK_PREFIX}.3
       frontend_egress:
         gw_priority: 1
@@ -62,35 +69,10 @@ services:
       start_period: 20s
       timeout: 5s
       retries: 3
-  cloudflared:
-    <<: *runtime
-    networks:
-      app:
-        ipv4_address: ${APP_NETWORK_PREFIX}.2
-      tunnel_egress:
-        gw_priority: 1
-    image: ${TUNNEL_IMAGE:?tunnel image digest required}
-    command: [tunnel, --no-autoupdate, run]
-    environment:
-      TUNNEL_METRICS: 127.0.0.1:2000
-    env_file:
-      - path: ${GDG_CONFIG:-${HOME}/.config/gdg}/tunnel.env
-        format: raw
-    healthcheck:
-      test: [CMD, cloudflared, tunnel, ready]
-      interval: 30s
-      timeout: 5s
-      start_period: 30s
-      retries: 3
 
 networks:
   app:
-    name: ${COMPOSE_PROJECT_NAME}-app-${APP_NETWORK_PREFIX}
-    internal: true
-    ipam:
-      config:
-        - subnet: ${APP_NETWORK_PREFIX}.0/24
-          ip_range: ${APP_NETWORK_PREFIX}.128/25
+    external: true
+    name: ${COMPOSE_PROJECT_NAME}-app
   backend_egress: {}
   frontend_egress: {}
-  tunnel_egress: {}

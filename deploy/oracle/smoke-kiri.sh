@@ -20,7 +20,7 @@ export RELEASE_TAG="smoke-$$"
 export BACKEND_SOURCE="$scratch/backend" FRONTEND_SOURCE="$scratch/frontend"
 export GDG_CONFIG="$scratch" API_PROXY_TARGET=http://gdg-backend:3001
 export APP_NETWORK_PREFIX="${APP_NETWORK_PREFIX:-10.253.$((RANDOM % 256))}" CSP_IMAGE_ORIGINS=https://storage.example.invalid NEXT_PUBLIC_API_URL=https://api.example.invalid
-export TUNNEL_IMAGE=docker.io/cloudflare/cloudflared@sha256:55c7e3e8d89d5e8d20b75a82f3602cbf98e06db406e73e282073cfdc5a9a3af6
+export APP_MEMORY=1g APP_CPUS=1 FRONTEND_PORT=0 BACKEND_PORT=0
 cat > "$scratch/backend.env" <<'ENV'
 DATABASE_URL=postgresql://postgres:fixture@db/postgres
 BETTER_AUTH_SECRET=abcdefghijklmnopqrstuvwxyz0123456789
@@ -46,8 +46,10 @@ services:
 YAML
 c=("${d[@]}" compose --env-file /dev/null -p "gdg-$RELEASE_TAG" -f "$kit/compose.oracle.yml")
 launched=false
+network_created=false
 cleanup() {
   if $launched; then "${c[@]}" down -v; fi
+  if $network_created; then "${d[@]}" network rm "gdg-$RELEASE_TAG-app"; fi
   python3 -c 'import shutil,sys; shutil.rmtree(sys.argv[1])' "$scratch"
 }
 trap cleanup EXIT
@@ -62,6 +64,8 @@ for app in backend frontend; do
   git -C "${!app}" archive HEAD | tar -x -C "$scratch/$app"
   "${c[@]}" build "$app"
 done
+"${d[@]}" network create --internal --subnet "$APP_NETWORK_PREFIX.0/24" --ip-range "$APP_NETWORK_PREFIX.128/25" "gdg-$RELEASE_TAG-app"
+network_created=true
 launched=true
 "${c[@]}" up -d --wait db
 "${c[@]}" up -d --wait --wait-timeout 180 --no-build --pull never backend frontend

@@ -28,13 +28,15 @@ Account: the GDG Cloudflare account that owns the `gdguj.org` zone.
 - Name: `gdg`
 - Tunnel ID: `1ff1c37a-3062-447c-a6dd-c52c306a211f`
 - Type: remotely managed (`config_src: cloudflare`). Routes live in Cloudflare, the server runs `cloudflared tunnel run` with a connector token.
-- Published routes, identical to `cloudflared.yml.example`:
+- Target routes, identical to `cloudflared.yml.example`:
 
 | Hostname | Service |
 |---|---|
-| `gdguj.org` | `http://gdg-frontend:3000` |
-| `www.gdguj.org` | `http://gdg-frontend:3000` |
-| `api.gdguj.org` | `http://gdg-backend:3001` |
+| `gdguj.org` | `http://gdg-prod-frontend:3000` |
+| `www.gdguj.org` | `http://gdg-prod-frontend:3000` |
+| `api.gdguj.org` | `http://gdg-prod-backend:3001` |
+| `dev.gdguj.org` | `http://gdg-dev-frontend:3000` |
+| `api-dev.gdguj.org` | `http://gdg-dev-backend:3001` |
 | everything else | `http_status:404` |
 
 ### DNS
@@ -57,7 +59,7 @@ Still to configure: a permanent edge redirect from `www.gdguj.org` to the apex, 
 - Extra lifecycle rule: incomplete multipart uploads are aborted after 7 days
 - Status: created on 2026-11-26.
 
-- An R2 API token with Object Read & Write, scoped to `gdg-backups` only, is created in the dashboard and entered on the server through `configure.py backup`.
+- An R2 API token with Object Read & Write, scoped to `gdg-backups` only, is created in the dashboard and entered on the server through `configure.py prod backup`.
 
 ## Oracle Cloud
 
@@ -92,7 +94,7 @@ Oracle reclaims idle Always Free instances when CPU, network and memory all stay
 
 ## Secrets
 
-Never commit or paste these. They are entered on the server with `python3 configure.py <service>`, which uses hidden prompts.
+Never commit or paste these. They are entered on the server with `python3 configure.py <dev|prod> <service>`, which uses hidden prompts.
 
 | Service | Values |
 |---|---|
@@ -106,7 +108,7 @@ Google OAuth callback to register: `https://gdguj.org/api/auth/callback/google`.
 ## Remaining steps
 
 1. Create the scoped R2 token.
-2. Enter secrets with `configure.py` and deploy with `release.sh`.
+2. Follow the RUNBOOK release gates. A manual dev dispatch deploys to gdg-dev using the gdgoc-uj-dev Supabase project. Both dev hostnames require Cloudflare Access. Production uses gdg-prod and requires a manual dispatch plus the owner’s environment approval.
 3. Verify readiness, sign-in, email delivery and the first R2 snapshot.
 4. Measure memory use and decide on the idle-reclaim resize.
 5. Add the `www` to apex redirect and UptimeRobot checks for the frontend and API readiness.

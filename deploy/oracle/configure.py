@@ -7,11 +7,13 @@ import tempfile
 
 
 def main():
-    name, = sys.argv[1:]
+    target, name = sys.argv[1:]
+    if target not in {"dev", "prod"} or target == "dev" and name not in {"frontend", "backend", "network"}:
+        raise ValueError("Unknown target or service")
     template = Path(__file__).parent / "env" / (name + ".env.example")
     if name not in {"frontend", "backend", "tunnel", "backup", "restore", "network"}:
         raise ValueError("Unknown environment")
-    directory = Path.home() / ".config" / "gdg"
+    directory = Path.home() / ".config" / "gdg" / target
     directory.mkdir(mode=0o700, parents=True, exist_ok=True)
     with open("/dev/tty", "rb", buffering=0):
         lines = []
