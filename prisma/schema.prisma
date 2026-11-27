@@ -536,6 +536,8 @@ model CommitteeTask {
 }
 
 model CommitteePointEntry {
+  operationId String? @unique @map("operation_id") @db.Uuid
+  recipientName String? @map("recipient_name_encrypted") @db.Text
   pointEntryId      Int      @id @default(autoincrement()) @map("point_entry_id")
   committeeId       Int      @map("committee_id")
   memberId          Int      @map("member_id")
@@ -553,6 +555,8 @@ model CommitteePointEntry {
 }
 
 model GlobalPointEntry {
+  operationId String? @unique @map("operation_id") @db.Uuid
+  recipientName String? @map("recipient_name_encrypted") @db.Text
   pointEntryId      Int      @id @default(autoincrement()) @map("point_entry_id")
   memberId          Int      @map("member_id")
   awardedByMemberId Int?     @map("awarded_by_member_id")
