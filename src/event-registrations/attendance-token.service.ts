@@ -4,7 +4,12 @@ import {
   createHash,
   randomBytes,
 } from 'node:crypto';
-import { Inject, Injectable, ServiceUnavailableException } from '@nestjs/common';
+import {
+  Inject,
+  Injectable,
+  Logger,
+  ServiceUnavailableException,
+} from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import QRCode from 'qrcode';
 
@@ -21,6 +26,7 @@ const FORMAT_VERSION = 'v1';
 // AES-256-GCM copy so the same QR can be shown again. Never log tokens.
 @Injectable()
 export class AttendanceTokenService {
+  private readonly logger = new Logger(AttendanceTokenService.name);
   private key?: Buffer;
 
   constructor(@Inject(ConfigService) private readonly config: ConfigService) {}
@@ -42,6 +48,16 @@ export class AttendanceTokenService {
         )
         .join('.'),
     };
+  }
+
+  revealOrNull(encrypted: string | null, registrationId: number): string | null {
+    if (!encrypted) return null;
+    try {
+      return this.reveal(encrypted);
+    } catch {
+      this.logger.warn({ event: 'attendance_token_reveal_failed', registrationId });
+      return null;
+    }
   }
 
   reveal(encrypted: string): string {

@@ -12,6 +12,7 @@ import {
   ParseIntPipe,
   Post,
   Query,
+  ServiceUnavailableException,
   UnauthorizedException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
@@ -142,13 +143,17 @@ export class GuestWalletWorkerController {
           row.event.endsAt <= new Date(),
       };
     }
+    const barcode = this.tokens.revealOrNull(row.attendanceTokenEncrypted, id);
+    if (!barcode) {
+      throw new ServiceUnavailableException('Attendance barcode is unavailable.');
+    }
     return {
       active: true as const,
       name: row.person.fullName,
       title: row.event.name,
       startsAt: row.event.startsAt,
       endsAt: row.event.endsAt,
-      barcode: this.tokens.reveal(row.attendanceTokenEncrypted),
+      barcode,
     };
   }
 

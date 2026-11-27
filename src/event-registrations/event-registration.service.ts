@@ -246,6 +246,10 @@ export class EventRegistrationService {
             ? row.confirmationDeadline.getTime() - now
             : 0;
         const awaiting = msLeft > 0;
+        const token =
+          row.status === RegistrationStatus.CONFIRMED
+            ? this.tokens.revealOrNull(attendanceTokenEncrypted, row.registrationId)
+            : null;
         return {
           ...row,
           secondsToConfirm: awaiting ? Math.floor(msLeft / 1000) : null,
@@ -259,13 +263,7 @@ export class EventRegistrationService {
               !row.checkedInAt &&
               row.event.startsAt.getTime() > now),
           // The owner's QR, issued only once they confirm.
-          attendanceQrCodeDataUrl:
-            row.status === RegistrationStatus.CONFIRMED &&
-            attendanceTokenEncrypted
-              ? await AttendanceTokenService.qrImage(
-                  this.tokens.reveal(attendanceTokenEncrypted),
-                )
-              : null,
+          attendanceQrCodeDataUrl: token ? await AttendanceTokenService.qrImage(token) : null,
         };
       }),
     );

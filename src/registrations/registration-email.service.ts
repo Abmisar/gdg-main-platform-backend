@@ -19,7 +19,7 @@ export interface RegistrationEmail {
   // Set for ACCEPTED and PROMOTED: the member must confirm before this time.
   confirmationDeadline?: Date;
   // Set for CONFIRMED: inline QR and a PNG attachment are sent to the member.
-  attendanceQrCodeDataUrl?: string;
+  attendanceQrCodeDataUrl?: string | null;
   whatsappGroupLink?: string | null;
   eventStartsAt?: Date;
   eventType?: string | null;
@@ -181,7 +181,9 @@ export class RegistrationEmailService {
       cid?: string;
     }[] = [];
     let qrHtml = '';
-    if (email.kind === 'CONFIRMED') {
+    const includeQr =
+      email.kind === 'CONFIRMED' && email.attendanceQrCodeDataUrl !== null;
+    if (includeQr) {
       const match = email.attendanceQrCodeDataUrl?.match(
         /^data:image\/png;base64,([A-Za-z0-9+/=]+)$/,
       );
@@ -305,22 +307,34 @@ export class RegistrationEmailService {
       },
       CONFIRMED: {
         ar: {
-          subject: `تم تأكيد حضورك في ${eventNameAr}، (QR Code) الخاص بك جاهز`,
+          subject: includeQr
+            ? `تم تأكيد حضورك في ${eventNameAr}، (QR Code) الخاص بك جاهز`
+            : `تم تأكيد حضورك في ${eventNameAr}`,
           body: [
             `يُسعدنا إبلاغك بتأكيد حضورك في ${eventNameAr}، ضمن محطات آفـاق مجموعة مطوّري جوجل بجامعة جدة✨`,
           ],
           closing: [
-            'ستجد بطاقة الحضور مرفقة بصيغة PNG، يرجى إبرازها عند المدخل لفريق العلاقات العامة',
+            ...(includeQr
+              ? [
+                  'ستجد بطاقة الحضور مرفقة بصيغة PNG، يرجى إبرازها عند المدخل لفريق العلاقات العامة',
+                ]
+              : []),
             afaqWishesAr,
           ],
         },
         en: {
-          subject: `Your Attendance at ${eventNameEn} Is Confirmed, Your QR Code Is Ready`,
+          subject: includeQr
+            ? `Your Attendance at ${eventNameEn} Is Confirmed, Your QR Code Is Ready`
+            : `Your Attendance at ${eventNameEn} Is Confirmed`,
           body: [
             `We’re pleased to confirm your attendance at ${eventNameEn}, one of the Afaq series events organized by Google Developer Group on Campus, University of Jeddah ✨`,
           ],
           closing: [
-            'Your attendance pass is attached as a PNG file. Please present it to the PR team at the event entrance',
+            ...(includeQr
+              ? [
+                  'Your attendance pass is attached as a PNG file. Please present it to the PR team at the event entrance',
+                ]
+              : []),
             'We look forward to seeing you at Afaq! Wishing you an enriching experience filled with learning and hands-on activities ✨',
           ],
         },
