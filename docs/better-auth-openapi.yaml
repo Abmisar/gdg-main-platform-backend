@@ -11,7 +11,9 @@ info:
 paths:
   /account/check-email:
     post:
-      summary: Select the email-first sign-in screen
+      summary: Return the password screen for every valid email
+      deprecated: true
+      description: Existing clients can continue to the password screen and offer signup or password recovery to everyone.
       requestBody:
         required: true
         content:
@@ -23,12 +25,27 @@ paths:
                 email: { type: string, format: email, maxLength: 255 }
       responses:
         '200':
-          description: GDG envelope with data.nextStep PASSWORD_REQUIRED, PASSWORD_SETUP_REQUIRED or SIGNUP_REQUIRED
+          description: All valid email addresses receive the same success envelope.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [success, message, error, data]
+                properties:
+                  success: { const: true }
+                  message: { const: OK }
+                  error: { type: 'null' }
+                  data:
+                    type: object
+                    required: [nextStep]
+                    properties:
+                      nextStep: { const: PASSWORD_REQUIRED }
         '400': { description: Invalid email (GDG error envelope) }
         '429': { description: Rate limit exceeded }
   /account/signup:
     post:
-      summary: Create unverified credentials and stage an application, without granting roles
+      summary: Accept an email signup request
+      description: Every valid request receives the same acknowledgement. New credentials and the application are staged together. Eligible users receive verification instructions by email. Clients should offer sign-in, resend and password recovery from the receipt screen. Native HTTP signup at /api/auth/sign-up/email is disabled.
       requestBody:
         required: true
         content:
@@ -69,11 +86,25 @@ paths:
                   uniqueItems: true
                   items: { type: string, enum: [ADVISOR, DEVELOPER_COMMITTEES_LEADER] }
       responses:
-        '201': { description: GDG envelope with data.emailVerificationRequired true }
+        '201':
+          description: Acknowledged for new and existing addresses alike.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [success, message, error, data]
+                properties:
+                  success: { const: true }
+                  message: { const: OK }
+                  error: { type: 'null' }
+                  data:
+                    type: object
+                    required: [emailVerificationRequired]
+                    properties:
+                      emailVerificationRequired: { const: true }
         '400': { description: Invalid profile or committee selection }
-        '409': { description: Email already reserved }
         '429': { description: Rate limit exceeded }
-        '503': { description: Email provider unavailable }
+        '503': { description: Authentication rate-limit storage unavailable }
   /account/profile-status:
     get:
       summary: Reconcile verified staged signup and select profile-completion or signed-in destination

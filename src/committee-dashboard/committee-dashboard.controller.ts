@@ -1,20 +1,25 @@
 import {
   BadRequestException,
   Body,
+  type CanActivate,
   Controller,
+  type ExecutionContext,
   Delete,
   Get,
   HttpCode,
   Inject,
+  Injectable,
   Param,
   ParseIntPipe,
   Patch,
   Post,
   Req,
   UploadedFile,
+  UseGuards,
   UseInterceptors,
 } from '@nestjs/common';
-import { FileInterceptor } from '@nestjs/platform-express';
+import { AuthRequiredGuard } from '../auth/current-user.js';
+import { ImageUploadInterceptor, ImageUploadLengthGuard } from '../common/http/image-upload.js';
 import { apiSuccess } from '../common/http/api-response.js';
 import type { RequestUser } from '../auth/auth.guard.js';
 import {
@@ -29,6 +34,17 @@ import {
 import { CommitteeDashboardService } from './committee-dashboard.service.js';
 import { LeadershipTasksService } from './leadership-tasks.service.js';
 import { CreateLeadershipTaskDto, UpdateLeadershipTaskDto } from './committee-dashboard.dto.js';
+
+@Injectable()
+export class CommitteeEventImageGuard implements CanActivate {
+  constructor(@Inject(CommitteeDashboardService) private readonly dashboard: CommitteeDashboardService) {}
+
+  async canActivate(context: ExecutionContext): Promise<boolean> {
+    const request = context.switchToHttp().getRequest<{ user?: RequestUser; params: { committeeCode: string } }>();
+    await this.dashboard.requireEventImagePermission(request.user, request.params.committeeCode);
+    return true;
+  }
+}
 
 @Controller('committees/:committeeCode')
 export class CommitteeDashboardController {
@@ -98,10 +114,8 @@ export class CommitteeDashboardController {
   }
 
   @Post('events/images')
-  @UseInterceptors(FileInterceptor('file', {
-    limits: { fileSize: 5 * 1024 * 1024 },
-    fileFilter: (_request, file, callback) => callback(null, ['image/jpeg', 'image/png', 'image/webp', 'image/gif'].includes(file.mimetype)),
-  }))
+  @UseGuards(AuthRequiredGuard, CommitteeEventImageGuard, ImageUploadLengthGuard)
+  @UseInterceptors(ImageUploadInterceptor)
   async uploadEventImage(
     @Req() request: { user?: RequestUser },
     @Param('committeeCode') committeeCode: string,

@@ -20,7 +20,6 @@ import {
   alreadyRegistered,
   confirmationExpired,
   invalidStatusTransition,
-  notYourRegistration,
   registrationClosed,
   registrationNotFound,
 } from '../registrations/registration-errors.js';
@@ -382,9 +381,8 @@ export class EventRegistrationService {
 
   private async ownRegistration(registrationId: number, personId: number) {
     const registration = await this.prisma.eventRegistration.findUnique({
-      where: { registrationId },
+      where: { registrationId, personId },
       select: {
-        personId: true,
         eventId: true,
         status: true,
         confirmedAt: true,
@@ -392,7 +390,6 @@ export class EventRegistrationService {
       },
     });
     if (!registration) throw registrationNotFound();
-    if (registration.personId !== personId) throw notYourRegistration();
     return registration;
   }
 

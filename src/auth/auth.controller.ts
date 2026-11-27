@@ -19,7 +19,7 @@ export class AuthController {
   @Post('account/check-email')
   @HttpCode(200)
   @AuthRateLimit({ scope: 'check-email', dimension: 'ip', limit: 60, windowSeconds: 60 }, { scope: 'check-email', dimension: 'email', limit: 10, windowSeconds: 60 })
-  async checkEmail(@Body() body: CheckEmailDto) { return apiSuccess(await this.auth.checkEmail(body)); }
+  checkEmail(@Body() _body: CheckEmailDto) { return apiSuccess({ nextStep: 'PASSWORD_REQUIRED' }); }
 
   @Post('account/signup')
   @AuthRateLimit({ scope: 'signup', dimension: 'ip', limit: 20, windowSeconds: 3600 }, { scope: 'signup', dimension: 'email', limit: 5, windowSeconds: 86400 })

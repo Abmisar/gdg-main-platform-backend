@@ -35,3 +35,36 @@ export function getAllowedFrontendOrigins(): string[] {
 
   return [...new Set(origins)];
 }
+
+export function validateProductionHttpConfig(): void {
+  if (process.env.NODE_ENV !== 'production') return;
+
+  const frontendUrl = process.env.FRONTEND_URL?.trim();
+  if (!frontendUrl || !normalizeOrigin(frontendUrl).startsWith('https://')) {
+    throw new Error('FRONTEND_URL must be a bare HTTPS origin in production.');
+  }
+  if (getAllowedFrontendOrigins().some((origin) => !origin.startsWith('https://'))) {
+    throw new Error('All FRONTEND_ORIGINS must use HTTPS in production.');
+  }
+
+  const configuredAuthUrl = process.env.BETTER_AUTH_URL;
+  if (configuredAuthUrl !== undefined) {
+    const authUrl = new URL(configuredAuthUrl);
+    if (
+      authUrl.origin !== normalizeOrigin(frontendUrl) ||
+      !['/', '/api/auth', '/api/auth/'].includes(authUrl.pathname) ||
+      authUrl.username || authUrl.password || authUrl.search || authUrl.hash
+    ) {
+      throw new Error('BETTER_AUTH_URL must use the public frontend HTTPS origin in production.');
+    }
+  }
+
+  const secret = process.env.BETTER_AUTH_SECRET ?? '';
+  if (secret.trim().length < 32 || /change[_ -]?me|placeholder|local[-_]test/i.test(secret)) {
+    throw new Error('BETTER_AUTH_SECRET must be a non-example secret of at least 32 characters.');
+  }
+
+  if (process.env.TRUST_PROXY_HOPS === undefined) {
+    throw new Error('TRUST_PROXY_HOPS must be explicitly configured in production.');
+  }
+}

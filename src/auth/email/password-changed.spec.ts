@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { Logger } from '@nestjs/common';
 import type { PrismaService } from '../../prisma/prisma.service.js';
 import type { ResendAuthEmailService } from './resend-auth-email.service.js';
 
@@ -57,5 +58,29 @@ describe('password reset security notice', () => {
         user: { id: 'user-id', email: 'owner@example.test' },
       }),
     ).resolves.toBeUndefined();
+  });
+});
+
+describe('public auth email requests', () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    vi.restoreAllMocks();
+  });
+
+  it('acknowledges failed verification and reset deliveries and logs only the kind', async () => {
+    vi.stubEnv('BETTER_AUTH_SECRET', 'test-only-secret-longer-than-thirty-two-characters');
+    const send = vi.fn().mockRejectedValue(new Error('provider diagnostic'));
+    const warn = vi.spyOn(Logger.prototype, 'warn').mockImplementation(() => {});
+    const options = createBetterAuth({} as PrismaService, { send } as unknown as ResendAuthEmailService) as unknown as {
+      emailAndPassword: { sendResetPassword(input: unknown): Promise<void> };
+      emailVerification: { sendVerificationEmail(input: unknown): Promise<void> };
+    };
+    const request = { user: { email: 'applicant@example.test', emailVerified: false }, url: 'https://example.test/' };
+    await expect(options.emailAndPassword.sendResetPassword(request)).resolves.toBeUndefined();
+    await expect(options.emailVerification.sendVerificationEmail(request)).resolves.toBeUndefined();
+    expect(warn.mock.calls).toEqual([
+      [{ event: 'auth_email_delivery_failed', kind: 'reset' }],
+      [{ event: 'auth_email_delivery_failed', kind: 'verification' }],
+    ]);
   });
 });

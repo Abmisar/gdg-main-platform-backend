@@ -1,3 +1,4 @@
+import { Logger } from '@nestjs/common';
 import { betterAuth } from 'better-auth';
 import { APIError, createAuthMiddleware, getOAuthState } from 'better-auth/api';
 import { openAPI } from 'better-auth/plugins';
@@ -9,8 +10,12 @@ import { hashAuthPassword, verifyAuthPassword } from './password.js';
 
 // Constructed by NestJS with the existing PrismaService; no second connection pool.
 export function createBetterAuth(prisma: PrismaService, email: ResendAuthEmailService) {
-  const origin = process.env.FRONTEND_URL ?? 'http://localhost:3000';
+  const origin = new URL(process.env.FRONTEND_URL ?? 'http://localhost:3000').origin;
   const secret = process.env.BETTER_AUTH_SECRET;
+  const logger = new Logger('AuthEmail');
+  const sendPublicAuthEmail = (input: Parameters<ResendAuthEmailService['send']>[0]) => {
+    void email.send(input).catch(() => logger.warn({ event: 'auth_email_delivery_failed', kind: input.kind }));
+  };
   if (!secret || secret.length < 32) throw new Error('BETTER_AUTH_SECRET must contain at least 32 characters');
   const sendWelcomeOnce = async (user: { id: string; emailVerified: boolean }) => {
     if (!user.emailVerified) return;
@@ -32,6 +37,7 @@ export function createBetterAuth(prisma: PrismaService, email: ResendAuthEmailSe
     plugins: [openAPI({ disableDefaultReference: true })],
     baseURL: process.env.BETTER_AUTH_URL ?? origin,
     basePath: '/api/auth',
+    disabledPaths: ['/sign-up/email'],
     secret,
     trustedOrigins: [origin],
     database: prismaAdapter(prisma, { provider: 'postgresql', transaction: true }),
@@ -51,7 +57,6 @@ export function createBetterAuth(prisma: PrismaService, email: ResendAuthEmailSe
     verification: { modelName: 'AuthVerification' },
     rateLimit: { enabled: true, storage: 'database', modelName: 'BetterAuthRateLimit', window: 60, max: 100, customRules: {
       '/sign-in/email': { window: 60, max: 5 },
-      '/sign-up/email': { window: 60, max: 3 },
       '/request-password-reset': { window: 60, max: 3 },
       '/send-verification-email': { window: 60, max: 2 },
     } },
@@ -96,7 +101,7 @@ export function createBetterAuth(prisma: PrismaService, email: ResendAuthEmailSe
         return valid;
       } },
       sendResetPassword: async ({ user, url }) => {
-        await email.send({ to: user.email, kind: 'reset', locale: ('locale' in user && user.locale === 'ar') ? 'ar' : 'en', url });
+        sendPublicAuthEmail({ to: user.email, kind: 'reset', locale: ('locale' in user && user.locale === 'ar') ? 'ar' : 'en', url });
       },
     },
     emailVerification: {
@@ -105,7 +110,12 @@ export function createBetterAuth(prisma: PrismaService, email: ResendAuthEmailSe
       sendOnSignIn: true,
       autoSignInAfterVerification: false,
       sendVerificationEmail: async ({ user, url }) => {
-        await email.send({ to: user.email, kind: 'verification', locale: ('locale' in user && user.locale === 'ar') ? 'ar' : 'en', url });
+        const message = { to: user.email, kind: 'verification', locale: ('locale' in user && user.locale === 'ar') ? 'ar' : 'en', url } as const;
+        if (!user.emailVerified) {
+          sendPublicAuthEmail(message);
+          return;
+        }
+        await email.send(message);
       },
       afterEmailVerification: sendWelcomeOnce,
     },

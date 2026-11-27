@@ -8,7 +8,7 @@ Better Auth uses the existing PrismaService/PostgreSQL connection and dedicated 
 
 Email/password requires verified personal email. Verification links, password recovery, welcome and two-step email-change messages use the single Resend SDK service with escaped bilingual HTML and plain text. Arabic is RTL. The user's stored locale selects email language. Google uses the existing Google project credentials via `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET`; authorize the frontend-origin callback `/api/auth/callback/google`. No magic-link/OTP sign-in plugin is enabled.
 
-Sessions use HttpOnly cookies, SameSite=Lax for OAuth callback navigation, Secure in production. Session cache is disabled, so guards read the database. Logout and password reset revoke database sessions. Better Auth enforces its own CSRF/origin protections. Application mutations with a session require the exact configured frontend origin. Configure `TRUST_PROXY_HOPS` for the actual deployment proxy chain; Nest overwrites the auth client-IP header from Express's resolved IP before the handler. Native auth rate limits persist in PostgreSQL, and application signup/recovery limits retain atomic PostgreSQL counters keyed by `BETTER_AUTH_SECRET`.
+Sessions use HttpOnly cookies, SameSite=Lax for OAuth callback navigation, Secure in production. Session cache is disabled, so guards read the database. Logout and password reset revoke database sessions. Better Auth enforces its own CSRF/origin protections. Application mutations with a session require the exact configured frontend origin. On Oracle, Compose supplies exact connector and frontend peer addresses in `TRUSTED_CF_PROXY_IPS` with `TRUST_PROXY_HOPS=0`. Both auth limiters use the Cloudflare visitor header from those peers and the socket address for other callers. Native auth rate limits persist in PostgreSQL, and application signup/recovery limits retain atomic PostgreSQL counters keyed by `BETTER_AUTH_SECRET`.
 
 Supabase JWTs, refresh tokens and old `gdg_access`/`gdg_refresh` cookies are no longer accepted. Users must sign in again after cutover. Supabase email links issued before cutover must be reissued using the new flow.
 
@@ -16,11 +16,23 @@ Supabase JWTs, refresh tokens and old `gdg_access`/`gdg_refresh` cookies are no 
 
 `person.auth_user_id` preserves the auth UUID link. The global guard accepts only verified Better Auth identities, reconciles staged signup, and loads active Person/Member rows. A deactivated Person remains unauthorized. An inactive Member retains its Person identity but gets no member permissions. Client cookies, OAuth metadata and supplied role fields never grant permissions.
 
-Unverified signup stores profile choices in `signup_verification` for 24 hours without a Person, membership or assigned role. First authenticated application access after verification atomically claims the staged row and creates the Person. Finalization is serialized on the Person row: non-members receive a non-member registration; applicants receive pending committee/global-role requests. Existing approval scopes, self-approval rejection and downstream committee/global permission checks remain unchanged.
+Unverified signup stores profile choices in `signup_verification`. Those choices are eligible for provisioning for 24 hours. First authenticated application access after verification atomically claims the staged row and creates the Person. Finalization is serialized on the Person row: non-members receive a non-member registration; applicants receive pending committee/global-role requests. Existing approval scopes, self-approval rejection and downstream committee/global permission checks remain unchanged.
 
 A verified Google account without a profile completes the existing registration form. A verified identity may claim an active unlinked Person with the same personal email; this happens only after server-verified inbox/Google identity proof, never from a submitted email alone. Already-linked Person IDs are never reassigned by email. Recovery for an application-only Person creates an unverified auth row; successful reset proves inbox ownership, and subsequent authenticated reconciliation establishes the link.
 
 Personal and university emails remain distinct. University email is profile data, never the credential or an authorization claim. Verified email changes require confirmation at the old address and verification at the new one, reject reserved application email addresses, invalidate outstanding recovery links, and synchronize the personal-email identity on application reconciliation.
+
+## Public signup and recovery
+
+`POST /account/check-email` remains available for legacy clients and answers `PASSWORD_REQUIRED` for every valid email. The frontend can always offer sign-in, signup and recovery. Valid submissions to `POST /account/signup` receive HTTP 201 with `data.emailVerificationRequired` set to `true`. Email/password applicants use this application route. Better Auth excludes the native HTTP signup route from its router and generated schema.
+
+New credentials use the configured Better Auth password policy and hash. One transaction reserves the address and persists the credential and staged application. Repeat submissions preserve the original password and profile choices. The backend dispatches verification after commit. The receipt is independent of email transport. Users can request another verification email from the receipt screen or use password recovery for account setup. Public resend and recovery delivery failures emit an event containing the mail kind.
+
+## Expired signup data
+
+Set `SIGNUP_RETENTION_REPORT_ENABLED=true` to log the counts of expired `signup_verification` and `pending_signup` rows daily at 03:00 UTC. The default is disabled. Each enabled backend replica reports its own observation of the same database. Use one observation per reporting period. A failed query emits `expired_signup_counts_unavailable`. The report uses two aggregate reads and logs the two counts under `expired_signup_counts`.
+
+Expiration controls provisioning eligibility. Physical retention and recovery policy require owner approval. The owner should use the counts to establish a retention window for each staging table, define how an applicant with expired data can resume, and verify restore and purge procedures before enabling deletion. This reporting job only counts rows.
 
 ## Imported passwords
 
@@ -30,7 +42,7 @@ Imported bcrypt is verified with bcrypt, including `$2a$`, `$2b$`, and `$2y$` va
 
 ## Configuration and verification
 
-Backend-only variables: `BETTER_AUTH_SECRET` (random, at least 32 characters), `BETTER_AUTH_URL` (public frontend origin), `FRONTEND_URL`, `RESEND_API_KEY`, `EMAIL_FROM`, Google credentials, and `DATABASE_URL`. Storage still needs Supabase URL/service key. Resend must have the sender domain verified. No frontend auth secrets or Supabase public auth keys are required.
+Backend-only variables: `BETTER_AUTH_SECRET` (random, at least 32 characters), `BETTER_AUTH_URL` (public frontend origin), `FRONTEND_URL`, `RESEND_API_KEY`, `EMAIL_FROM`, Google credentials, and `DATABASE_URL`. Image storage uses the Supabase URL, a publishable key and a scoped asset-upload token. See [the bucket and credential setup](../SETUP.md). Resend must have the sender domain verified. No frontend auth secrets or Supabase public auth keys are required.
 
 Run `pnpm test`, `pnpm typecheck`, `pnpm lint`, `pnpm build`; run `pnpm test:auth:local` only with an explicitly selected isolated loopback DATABASE_URL and committed migrations applied. The local integration tests record emails instead of sending them and mock all Google network requests. They cover staged signup, bcrypt import/upgrade, recovery, session revocation, unlinked-person proof, OAuth state/account linking, and two-address email change. Do not run migration/import against production in this workflow.
 

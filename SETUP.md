@@ -186,8 +186,47 @@ Open [the frontend](http://localhost:3000). Use `gdg stop` to stop all services 
 
 ## Better Auth and Resend
 
-Apply committed Prisma migrations before starting this backend. Set `BETTER_AUTH_SECRET` to a new random secret (at least 32 characters), `BETTER_AUTH_URL` and `FRONTEND_URL` to the public frontend origin, and retain the existing Google client credentials. Register `https://<frontend-origin>/api/auth/callback/google` in Google OAuth. The frontend proxies `/api/auth/*` unchanged to NestJS; app endpoints strip the outer `/api` prefix. Configure `TRUST_PROXY_HOPS` for the actual trusted proxy chain.
+Apply committed Prisma migrations before starting this backend. Set `BETTER_AUTH_SECRET` to a new random secret (at least 32 characters), `BETTER_AUTH_URL` and `FRONTEND_URL` to the public frontend origin, and retain the existing Google client credentials. Register `https://<frontend-origin>/api/auth/callback/google` in Google OAuth. The frontend proxies `/api/auth/*` unchanged to NestJS; app endpoints strip the outer `/api` prefix. On Oracle set `TRUST_PROXY_HOPS=0` and use the Compose-provided `TRUSTED_CF_PROXY_IPS` list of exact connector and frontend peers.
 
 Set `RESEND_API_KEY` privately and `EMAIL_FROM="GDG on Campus UJ <noreply@gdguj.org>"`. The owner reports `gdguj.org` verified in Resend (Tokyo / ap-northeast-1), including DKIM and send/rsend records. Recommended owner DNS addition: TXT `_dmarc` → `v=DMARC1; p=none;`. Sender remains environment-driven. Never commit `.env` or keys. `EMAIL_TEST_TO` is optional and must be an owner-controlled inbox; without it, skip live mail tests.
 
-Supabase URL/service key remain required only for Storage; existing SMTP configuration remains for non-auth event/membership messages. See [migration plan](docs/auth-migration-plan.md) for import, local checks and coordinated cutover.
+For identity import, local checks, and coordinated cutover, see the [migration plan](docs/auth-migration-plan.md).
+
+### Image uploads
+
+Provision a dedicated public Supabase Storage bucket with file size limit 5,242,880 bytes, and allowed MIME types `image/jpeg`, `image/png`, `image/webp`, and `image/gif`. The default bucket ID and name are `event-images`. If that name belongs to a private or mixed-use bucket, provision a separate public bucket, set `SUPABASE_ASSET_BUCKET` to its ID, and substitute that ID in both SQL predicates below. Use 1–63 lowercase letters, digits, or hyphens, starting with a letter or digit. Event images use the bucket root and announcement images use `announcements/`. Existing public object URLs retain these paths.
+
+Configure the HTTPS `SUPABASE_URL` and `SUPABASE_PUBLISHABLE_KEY` for the storage project. Put a project-accepted, signed, expiring JWT with role `gdg_asset_uploader` and a dedicated service subject in the backend secret `SUPABASE_ASSET_UPLOAD_TOKEN`. Have the project-authorized issuer sign the JWT with a key accepted by the storage project using its configured algorithm and key ID. Use the dedicated service UUID as `sub`, set `role` to `gdg_asset_uploader`, include the issuer and audience required by the project, and set Unix-time `iat` and a short `exp`. Keep the signing key in the issuer. Assign a renewal owner and record expiry. Before expiry, mint a replacement with the same scope, replace the token in the private backend environment, recreate the backend container to load it, and verify an authorized upload. Supabase validates each request with the supplied bearer token. [Supabase custom Storage roles](https://supabase.com/docs/guides/storage/schema/custom-roles)
+
+The following SQL describes the grants and RLS policies for a new upload role. Apply them as a storage administrator during provisioning. Before staging, confirm RLS on both storage tables, that the Storage service can assume the dedicated role in this project, and that existing grants and policy defaults do not give the uploader broader access. Supabase requires bucket metadata `SELECT` for the per-upload check and object `INSERT` for new files. [Supabase Storage access control](https://supabase.com/docs/guides/storage/security/access-control)
+
+```sql
+CREATE ROLE gdg_asset_uploader NOLOGIN NOINHERIT NOBYPASSRLS;
+GRANT gdg_asset_uploader TO authenticator;
+GRANT USAGE ON SCHEMA storage TO gdg_asset_uploader;
+GRANT SELECT ON storage.buckets TO gdg_asset_uploader;
+GRANT INSERT ON storage.objects TO gdg_asset_uploader;
+
+CREATE POLICY gdg_asset_bucket_read ON storage.buckets
+  FOR SELECT TO gdg_asset_uploader
+  USING (id = 'event-images' AND public);
+
+CREATE POLICY gdg_asset_object_insert ON storage.objects
+  FOR INSERT TO gdg_asset_uploader
+  WITH CHECK (
+    bucket_id = 'event-images'
+    AND EXISTS (
+      SELECT 1 FROM storage.buckets AS b
+      WHERE b.id = bucket_id AND b.public AND b.file_size_limit = 5242880
+        AND b.allowed_mime_types @> ARRAY['image/jpeg','image/png','image/webp','image/gif']::text[]
+        AND cardinality(b.allowed_mime_types) = 4
+    )
+    AND name ~ '^(announcements/)?[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}[.](jpg|png|webp|gif)$'
+  );
+```
+
+Forward `Content-Length` to the backend on both multipart image POST routes. Set the ingress body limit to 5,259,264 bytes for these routes. The application returns HTTP 411 for chunked bodies or missing lengths and HTTP 413 for requests above that limit. The file itself may be at most 5 MiB.
+
+### SMTP submission
+
+Configure `SMTP_HOST` with a DNS name matching the relay's trusted TLS certificate. Port 465 uses implicit TLS. Other configured ports require STARTTLS and a valid certificate before authentication and message submission.

@@ -161,7 +161,7 @@ export class AnnouncementsService {
     return { id: String(announcementId) };
   }
 
-  private async requireManager(user: AuthenticatedUser) {
+  async requireManager(user: AuthenticatedUser) {
     if (!user.memberId || !(await this.access.hasGlobalPermission(user.memberId, 'announcements.manage'))) {
       throw new ForbiddenException();
     }

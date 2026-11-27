@@ -46,10 +46,15 @@ paths:
     post:
       operationId: uploadCommitteeEventImage
       summary: Upload an event image
-      description: Uploads an image to the public event image bucket. An active committee member with events.create permission is required. The permission is granted to Data Analysis and PR Leaders and Co-Leaders for their own committee events.
+      description: Uploads an image to the public event image bucket. An active committee member with events.create permission is required. The permission is granted to Data Analysis and PR Leaders and Co-Leaders for their own committee events. Send exactly one file up to 5 MiB and no text fields.
       security:
         - accessCookie: []
       parameters:
+        - name: Content-Length
+          in: header
+          required: true
+          description: Size in bytes of the complete multipart body, including its boundary and headers.
+          schema: { type: integer, minimum: 1, maximum: 5259264 }
         - name: committeeCode
           in: path
           required: true
@@ -61,13 +66,14 @@ paths:
           multipart/form-data:
             schema:
               type: object
+              additionalProperties: false
               required: [file]
               properties:
                 file:
                   type: string
                   format: binary
       responses:
-        '200':
+        '201':
           description: Image uploaded.
           content:
             application/json:
@@ -79,8 +85,10 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ApiFailure'
+        '411':
+          description: Content-Length is required. Chunked uploads are unsupported.
         '413':
-          description: Image exceeds the 5 MB upload limit.
+          description: Image exceeds 5 MiB or the complete multipart body exceeds 5259264 bytes.
           content:
             application/json:
               schema:
