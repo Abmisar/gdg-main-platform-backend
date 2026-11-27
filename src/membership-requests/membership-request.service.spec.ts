@@ -24,13 +24,9 @@ const access = {
   hasCommitteePermission,
   hasGlobalPermission,
 } as unknown as CommitteeAccessService;
-const emailService = {
-  sendDecisionEmail: vi.fn().mockResolvedValue(undefined),
-};
 const service = new MembershipRequestService(
   prisma,
   access,
-  emailService as any,
 );
 const actor = { personId: 8, memberId: 17 };
 
@@ -38,12 +34,12 @@ beforeEach(() => {
   vi.clearAllMocks();
   hasCommitteePermission.mockResolvedValue(true);
   hasGlobalPermission.mockResolvedValue(true);
-  emailService.sendDecisionEmail.mockResolvedValue(undefined);
   findUniqueCommittee.mockResolvedValue({ committeeId: 3 });
   findCommitteeHierarchy.mockResolvedValue([
     { committeeId: 3, parent: { committeeCode: 'DEV' } },
   ]);
   tx.$queryRaw = vi.fn().mockResolvedValue([{ membership_request_id: 40 }]);
+  tx.membershipDecisionDelivery = { create: vi.fn() };
   tx.committee = { findMany: findCommitteeHierarchy };
   tx.membershipRequestCommittee = {
     findFirst: vi.fn().mockResolvedValue({
@@ -54,7 +50,7 @@ beforeEach(() => {
       requestedRole: 'Member',
       approvalScope: 'COMMITTEE',
     }),
-    update: vi.fn().mockResolvedValue({}),
+    update: vi.fn().mockResolvedValue({ status: Decision.APPROVED, requestedRole: 'Member', decidedAt: new Date(), committee: { committeeName: 'Data' } }),
     findUnique: vi.fn(),
     findMany: vi
       .fn()
@@ -71,7 +67,7 @@ beforeEach(() => {
         membershipRequestId: 40,
         personId: 61,
         status: 'PENDING',
-        applicationData: { university: 'Example University' },
+        applicationData: { phoneNumber: 'private', skillsByCommittee: { DATA: ['SQL'], PR: ['Writing'] } },
         createdAt: new Date('2026-10-24T00:00:00Z'),
         person: {
           fullName: 'Noura',
@@ -136,6 +132,23 @@ function leadershipRow(overrides: Record<string, unknown>) {
 }
 
 describe('MembershipRequestService.decide', () => {
+  it('projects only the selected committee on the listing', async () => {
+    const row = {
+      status: Decision.PENDING, requestedRole: 'Member', decidedAt: null,
+      committee: { committeeName: 'Data' },
+      membershipRequest: {
+        membershipRequestId: 40, createdAt: new Date(), person: { fullName: 'Noura', emailPersonal: 'private' },
+        applicationData: { phoneNumber: 'private', skillsByCommittee: { DATA: ['SQL'], PR: ['Writing'] } },
+      },
+    };
+    const listing = new MembershipRequestService({
+      ...prisma, membershipRequestCommittee: { findMany: async () => [row] },
+    } as unknown as PrismaService, access);
+    const [request] = await listing.list('DATA', 17);
+    expect(request.applicant).toEqual({ fullName: 'Noura', details: { skillsByCommittee: { DATA: ['SQL'] } } });
+    expect(request.committees.map(item => item.code)).toEqual(['DATA']);
+  });
+
   it('changes only the selected committee, grants Member role, and keeps aggregate pending', async () => {
     const result = await service.decide(40, 'DATA', 'APPROVED', actor);
 
@@ -165,20 +178,13 @@ describe('MembershipRequestService.decide', () => {
       where: { membershipRequestId: 40 },
       data: { status: 'PENDING' },
     });
-    expect(emailService.sendDecisionEmail).toHaveBeenCalledWith(
-      expect.objectContaining({
-        to: 'noura@example.test',
-        decision: 'APPROVED',
-        committeeName: 'Data',
-        roleName: 'Leader',
-      }),
-    );
+    expect(tx.membershipDecisionDelivery.create).toHaveBeenCalledWith({ data: { committeeId: 400 } });
+    expect(result.applicant).toEqual({ fullName: 'Noura', details: { skillsByCommittee: { DATA: ['SQL'] } } });
     expect(result).toMatchObject({
-      status: 'PENDING',
+      status: 'APPROVED',
       committeeDecision: { committeeCode: 'DATA', status: 'APPROVED' },
       committees: [
         { code: 'DATA', status: 'APPROVED' },
-        { code: 'PR', status: 'PENDING' },
       ],
     });
   });
@@ -410,7 +416,6 @@ describe('MembershipRequestService approval routing', () => {
         memberRole: tx.memberRole,
       } as unknown as PrismaService,
       access,
-      emailService as any,
     );
 
     const result = await listing.listLeadership('CLUB', actor);

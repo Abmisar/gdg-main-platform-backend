@@ -344,6 +344,7 @@ model MembershipRequest {
 }
 
 model MembershipRequestCommittee {
+  delivery MembershipDecisionDelivery?
   membershipRequestCommitteeId Int                        @id @default(autoincrement()) @map("membership_request_committee_id")
   membershipRequestId          Int                        @map("membership_request_id")
   committeeId                  Int                        @map("committee_id")
@@ -363,6 +364,7 @@ model MembershipRequestCommittee {
 }
 
 model MembershipRequestGlobalRole {
+  delivery MembershipDecisionDelivery?
   membershipRequestGlobalRoleId Int                        @id @default(autoincrement()) @map("membership_request_global_role_id")
   membershipRequestId           Int                        @map("membership_request_id")
   roleCode                      String                     @map("role_code") @db.Text
@@ -893,4 +895,18 @@ model EventRetentionAggregate {
   event Event @relation(fields: [eventId], references: [eventId], onDelete: Cascade)
 
   @@map("event_retention_aggregate")
+}
+
+model MembershipDecisionDelivery {
+  id             Int @id @default(autoincrement())
+  committeeId    Int? @unique @map("committee_decision_id")
+  globalId       Int? @unique @map("global_decision_id")
+  attempts       Int @default(0)
+  availableAt    DateTime @default(now()) @map("available_at") @db.Timestamptz(3)
+  sentAt         DateTime? @map("sent_at") @db.Timestamptz(3)
+  committee      MembershipRequestCommittee? @relation(fields: [committeeId], references: [membershipRequestCommitteeId], onDelete: Cascade, onUpdate: NoAction)
+  global         MembershipRequestGlobalRole? @relation(fields: [globalId], references: [membershipRequestGlobalRoleId], onDelete: Cascade, onUpdate: NoAction)
+
+  @@index([sentAt, availableAt])
+  @@map("membership_decision_delivery")
 }

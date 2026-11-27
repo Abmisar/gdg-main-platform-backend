@@ -34,7 +34,7 @@ export class MembershipRequestEmailService {
     @Inject(SmtpEmailService) private readonly smtp: SmtpEmailService,
   ) {}
 
-  async sendDecisionEmail(email: MembershipDecisionEmail): Promise<void> {
+  async sendDecisionEmail(email: MembershipDecisionEmail, requireDelivery = false): Promise<void> {
     const deliveryId = randomUUID();
     if (!email.to) {
       this.logger.warn({
@@ -42,6 +42,7 @@ export class MembershipRequestEmailService {
         reason: 'NO_EMAIL_ADDRESS',
         deliveryId,
       });
+      if (requireDelivery) throw new Error('Membership decision email unavailable');
       return;
     }
 
@@ -52,6 +53,7 @@ export class MembershipRequestEmailService {
         reason: 'SMTP_NOT_CONFIGURED',
         deliveryId,
       });
+      if (requireDelivery) throw new Error('Membership decision email unavailable');
       return;
     }
 

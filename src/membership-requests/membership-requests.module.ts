@@ -1,3 +1,4 @@
+import { MembershipDeliveryJob } from './membership-delivery.job.js';
 import { Module } from '@nestjs/common';
 import { AuthModule } from '../auth/auth.module.js';
 import { PrismaModule } from '../prisma/prisma.module.js';
@@ -11,7 +12,7 @@ import { VerifiedEmailGuard } from './verified-email.guard.js';
 @Module({
   imports: [AuthModule, PrismaModule, SmtpEmailModule],
   controllers: [MembershipRequestsController],
-  providers: [CommitteeAccessService, MembershipRequestEmailService, MembershipRequestService, VerifiedEmailGuard],
+  providers: [MembershipDeliveryJob, CommitteeAccessService, MembershipRequestEmailService, MembershipRequestService, VerifiedEmailGuard],
   exports: [MembershipRequestEmailService],
 })
 export class MembershipRequestsModule {}
