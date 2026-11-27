@@ -3,7 +3,7 @@ Description=Archive GDG database and storage to R2
 
 [Service]
 Type=oneshot
-EnvironmentFile=%h/.config/gdg/backup.env
-ExecStart=/usr/bin/python3 %h/backend/deploy/oracle/snapshot.py backup
+EnvironmentFile=%h/.config/gdg/prod/backup.env
+ExecStart=/usr/bin/python3 /opt/gdg/oracle/snapshot.py backup
 UMask=0077
 TimeoutStartSec=6h

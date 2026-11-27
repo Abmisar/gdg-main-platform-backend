@@ -1,0 +1,43 @@
+x-runtime: &runtime
+  platform: linux/arm64
+  restart: unless-stopped
+  security_opt: [no-new-privileges:true]
+  cap_drop: [ALL]
+  logging:
+    driver: json-file
+    options:
+      max-size: 10m
+      max-file: "3"
+
+services:
+  cloudflared:
+    <<: *runtime
+    networks:
+      dev:
+        ipv4_address: ${DEV_PREFIX}.2
+      prod:
+        ipv4_address: ${PROD_PREFIX}.2
+      tunnel_egress:
+        gw_priority: 1
+    image: docker.io/cloudflare/cloudflared@sha256:55c7e3e8d89d5e8d20b75a82f3602cbf98e06db406e73e282073cfdc5a9a3af6
+    command: [tunnel, --no-autoupdate, run]
+    environment:
+      TUNNEL_METRICS: 127.0.0.1:2000
+    env_file:
+      - path: ${HOME}/.config/gdg/prod/tunnel.env
+        format: raw
+    healthcheck:
+      test: [CMD, cloudflared, tunnel, ready]
+      interval: 30s
+      timeout: 5s
+      start_period: 30s
+      retries: 3
+
+networks:
+  dev:
+    external: true
+    name: gdg-dev-app
+  prod:
+    external: true
+    name: gdg-prod-app
+  tunnel_egress: {}
