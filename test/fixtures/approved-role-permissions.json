@@ -1,6 +1,70 @@
 [
-  { "role_code": "GROUP_CO_LEADER", "code": "announcements.manage" },
-  { "role_code": "GROUP_CO_LEADER", "code": "members.manage" },
-  { "role_code": "GROUP_LEADER", "code": "announcements.manage" },
-  { "role_code": "GROUP_LEADER", "code": "members.manage" }
+  {
+    "role_code": "DEVELOPER_COMMITTEES_LEADER",
+    "code": "applications.developer_leaders.decide"
+  },
+  {
+    "role_code": "DEVELOPER_COMMITTEES_LEADER",
+    "code": "developer_committees.dashboard.view"
+  },
+  {
+    "role_code": "DEVELOPER_COMMITTEES_LEADER",
+    "code": "developer_committees.members.assign"
+  },
+  {
+    "role_code": "DEVELOPER_COMMITTEES_LEADER",
+    "code": "developer_committees.points.manage"
+  },
+  {
+    "role_code": "DEVELOPER_COMMITTEES_LEADER",
+    "code": "developer_committees.tasks.manage"
+  },
+  {
+    "role_code": "GROUP_CO_LEADER",
+    "code": "announcements.manage"
+  },
+  {
+    "role_code": "GROUP_CO_LEADER",
+    "code": "applications.club_leaders.decide"
+  },
+  {
+    "role_code": "GROUP_CO_LEADER",
+    "code": "club.dashboard.view"
+  },
+  {
+    "role_code": "GROUP_CO_LEADER",
+    "code": "club.points.manage"
+  },
+  {
+    "role_code": "GROUP_CO_LEADER",
+    "code": "club.tasks.manage"
+  },
+  {
+    "role_code": "GROUP_CO_LEADER",
+    "code": "members.manage"
+  },
+  {
+    "role_code": "GROUP_LEADER",
+    "code": "announcements.manage"
+  },
+  {
+    "role_code": "GROUP_LEADER",
+    "code": "applications.club_leaders.decide"
+  },
+  {
+    "role_code": "GROUP_LEADER",
+    "code": "club.dashboard.view"
+  },
+  {
+    "role_code": "GROUP_LEADER",
+    "code": "club.points.manage"
+  },
+  {
+    "role_code": "GROUP_LEADER",
+    "code": "club.tasks.manage"
+  },
+  {
+    "role_code": "GROUP_LEADER",
+    "code": "members.manage"
+  }
 ]

@@ -171,11 +171,16 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)(
       ).rejects.toThrow(constraint);
     }
 
-    it('includes exactly the three approved initial roles', async () => {
+    it('includes exactly the approved initial roles', async () => {
       expect(await db.role.findMany({ orderBy: { roleCode: 'asc' } })).toEqual([
         {
           roleCode: 'ADVISOR',
           description: 'Club advisor',
+          isPrivileged: true,
+        },
+        {
+          roleCode: 'DEVELOPER_COMMITTEES_LEADER',
+          description: 'Developer committees overall leader',
           isPrivileged: true,
         },
         {
@@ -246,7 +251,7 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)(
       }, 'role_permission_role_code_fkey');
     });
 
-    it('installs exactly the two approved role links with the existing composite primary key', async () => {
+    it('installs exactly the approved role links with the existing composite primary key', async () => {
       const rows = await db.$queryRaw`
         SELECT role_code, code FROM role_permission ORDER BY role_code, code`;
       expect(rows).toEqual(approvedRolePermissions);
@@ -274,16 +279,13 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)(
           },
         },
       });
-      expect(roles).toEqual([
-        { roleCode: 'ADVISOR', permissions: [] },
-        ...['GROUP_CO_LEADER', 'GROUP_LEADER'].map((roleCode) => ({
-          roleCode,
-          permissions: [
-            { code: 'announcements.manage', permission: { scope: 'global' } },
-            { code: 'members.manage', permission: { scope: 'global' } },
-          ],
+      expect(roles).toEqual(['ADVISOR', 'DEVELOPER_COMMITTEES_LEADER', 'GROUP_CO_LEADER', 'GROUP_LEADER'].map((roleCode) => ({
+        roleCode,
+        permissions: approvedRolePermissions.filter((row) => row.role_code === roleCode).map((row) => ({
+          code: row.code,
+          permission: { scope: 'global' },
         })),
-      ]);
+      })));
       expect(await db.memberRole.count()).toBe(0);
     });
 
@@ -371,7 +373,7 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)(
       }, 'code');
     });
 
-    it('installs the approved DATA and PR reference committees without memberships', async () => {
+    it('installs the approved reference committees without memberships', async () => {
       const rows = await db.$queryRaw`
         SELECT c.committee_code, c.committee_name, p.committee_code AS parent_committee_code
         FROM committee c LEFT JOIN committee p ON p.committee_id=c.parent_committee_id ORDER BY c.committee_code`;
@@ -379,13 +381,13 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)(
       expect(await db.memberCommittee.count()).toBe(0);
     });
 
-    it('installs exactly the eight approved committee permission rules', async () => {
+    it('installs exactly the approved committee permission rules', async () => {
       const rows = await db.$queryRaw`
         SELECT c.committee_code, cp.committee_role, cp.code, cp.applies_to, cp.include_sub_committees
         FROM committee_permission cp LEFT JOIN committee c ON c.committee_id=cp.committee_id
         ORDER BY c.committee_code, cp.committee_role, cp.code`;
       expect(rows).toEqual(approvedCommitteePolicy.permissions);
-      expect(await db.rolePermission.count()).toBe(2);
+      expect(await db.rolePermission.count()).toBe(17);
       expect(await db.memberRole.count()).toBe(0);
     });
 
@@ -649,7 +651,7 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)(
         SELECT code, description, scope, grant_permission, is_sensitive
         FROM permission ORDER BY code`;
       expect(rows).toEqual(approvedPermissions);
-      expect(await db.rolePermission.count()).toBe(2);
+      expect(await db.rolePermission.count()).toBe(17);
     });
 
     it('resolves approved grant references through Prisma without role assignments', async () => {
@@ -1231,6 +1233,7 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)(
           'join_date',
           'member_id',
           'member_type',
+          'membership_number',
           'person_id',
           'updated_at',
         ]);
@@ -1279,7 +1282,7 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)(
             column_name: string;
             identity_generation: string;
           }[]
-        >`SELECT table_name,column_name,identity_generation FROM information_schema.columns WHERE table_schema='public' AND is_identity='YES' ORDER BY table_name,column_name`;
+        >`SELECT table_name,column_name,identity_generation FROM information_schema.columns WHERE table_schema='public' AND is_identity='YES' AND table_name IN ('committee','committee_permission','member','member_committee','member_role','member_skill','person','skill') ORDER BY table_name,column_name`;
         expect(columns).toEqual([
           {
             table_name: 'committee',
@@ -1295,6 +1298,11 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)(
             table_name: 'member',
             column_name: 'member_id',
             identity_generation: 'BY DEFAULT',
+          },
+          {
+            table_name: 'member',
+            column_name: 'membership_number',
+            identity_generation: 'ALWAYS',
           },
           {
             table_name: 'member_committee',
@@ -1471,23 +1479,41 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)(
         { conname: string }[]
       >`SELECT conname FROM pg_constraint WHERE contype = 'c' AND connamespace = 'public'::regnamespace ORDER BY conname`;
       expect(rows.map((row) => row.conname)).toEqual([
+        'announcement_action_pair_status_check',
+        'auth_rate_limit_bucket_request_count_check',
         'blacklist_resolution_check',
         'committee_code_check',
         'committee_parent_not_self_check',
         'committee_permission_applies_to_check',
         'committee_permission_check',
         'committee_permission_committee_role_check',
+        'committee_point_entry_delta_check',
+        'committee_task_event_scope_check',
+        'committee_task_priority_check',
+        'committee_task_scope_check',
+        'committee_task_status_check',
+        'email_verification_challenge_attempts_check',
+        'email_verification_challenge_purpose_check',
         'event_questions_options_check',
         'event_questions_position_check',
         'events_capacity_check',
         'events_confirmation_window_check',
         'events_schedule_check',
+        'global_point_entry_delta_check',
         'member_committee_role_check',
         'member_member_type_check',
         'member_role_dates_check',
+        'membership_request_committee_approval_scope_check',
+        'membership_request_committee_decision_check',
+        'membership_request_committee_requested_role_check',
+        'membership_request_global_role_allowed_check',
+        'membership_request_global_role_decision_check',
+        'pending_signup_registration_type_check',
         'permission_code_check',
         'permission_scope_check',
+        'person_email_identity_kind_check',
         'person_full_name_check',
+        'registration_email_delivery_lease_check',
         'registrations_approval_check',
         'registrations_cancellation_check',
         'registrations_check_in_check',
@@ -1496,6 +1522,8 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)(
         'registrations_token_check',
         'registrations_waitlist_position_check',
         'role_code_check',
+        'signup_verification_attempts_check',
+        'wallet_barcode_alias_barcode_hash_check',
       ]);
     });
 
@@ -1506,7 +1534,7 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)(
       ['CONFIRMED', confirmation],
       ['DECLINED', {}],
       ['CANCELLED', { ...confirmation, cancelled_at: cancelled }],
-      ['CANCELLED without confirmation', { ...approval, cancelled_at: cancelled }],
+      ['CANCELLED', { ...approval, cancelled_at: cancelled }],
       ['LATE_CANCELLATION', { ...confirmation, cancelled_at: cancelled }],
       ['NOT_SELECTED', {}],
       ['REJECTED', {}],
@@ -2115,17 +2143,16 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)(
           'Answer',
         );
       }, 'registration_answers_registration_id_event_id_fkey');
-      for (const [table, key, fk] of [
-        ['member', 'member_id', 'events_created_by_member_id_fkey'],
-        ['events', 'event_id', 'event_registrations_event_id_fkey'],
-      ]) {
-        await invalid(async (tx, f) => {
-          await tx.$executeRawUnsafe(
-            `DELETE FROM "${table}" WHERE "${key}" = $1`,
-            table === 'member' ? f.member.memberId : f.event.eventId,
-          );
-        }, fk);
-      }
+      await valid(async (tx, f) => {
+        await tx.member.delete({ where: { memberId: f.member.memberId } });
+        expect(await tx.event.findUniqueOrThrow({ where: { eventId: f.event.eventId } })).toMatchObject({
+          eventId: f.event.eventId,
+          createdByMemberId: null,
+        });
+      });
+      await invalid(async (tx, f) => {
+        await tx.event.delete({ where: { eventId: f.event.eventId } });
+      }, 'event_registrations_event_id_fkey');
       await invalid(async (tx, f) => {
         await tx.registrationAnswer.create({
           data: {

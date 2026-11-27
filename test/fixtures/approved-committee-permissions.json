@@ -1,18 +1,119 @@
 {
   "committees": [
     {
+      "committee_code": "AI",
+      "committee_name": "Artificial Intelligence",
+      "parent_committee_code": "DEV"
+    },
+    {
+      "committee_code": "AUTOMATION",
+      "committee_name": "Automation",
+      "parent_committee_code": "DEV"
+    },
+    {
+      "committee_code": "CONTENT",
+      "committee_name": "Content Writing",
+      "parent_committee_code": null
+    },
+    {
+      "committee_code": "CYBER",
+      "committee_name": "Cybersecurity",
+      "parent_committee_code": "DEV"
+    },
+    {
       "committee_code": "DATA",
-      "committee_name": "Data",
+      "committee_name": "Data Analysis",
+      "parent_committee_code": "DEV"
+    },
+    {
+      "committee_code": "DEV",
+      "committee_name": "Developers",
+      "parent_committee_code": null
+    },
+    {
+      "committee_code": "DMD",
+      "committee_name": "Digital Media and Design",
+      "parent_committee_code": null
+    },
+    {
+      "committee_code": "PM",
+      "committee_name": "Project Management",
       "parent_committee_code": null
     },
     {
       "committee_code": "PR",
       "committee_name": "Public Relations",
       "parent_committee_code": null
+    },
+    {
+      "committee_code": "ROBOTICS",
+      "committee_name": "Robotics & IoT",
+      "parent_committee_code": "DEV"
+    },
+    {
+      "committee_code": "WEB",
+      "committee_name": "Web Development",
+      "parent_committee_code": "DEV"
     }
   ],
   "permissions": [
     {
+      "committee_code": "AI",
+      "committee_role": "Co-Leader",
+      "code": "applications.decide",
+      "applies_to": "own",
+      "include_sub_committees": false
+    },
+    {
+      "committee_code": "AI",
+      "committee_role": "Leader",
+      "code": "applications.decide",
+      "applies_to": "own",
+      "include_sub_committees": false
+    },
+    {
+      "committee_code": "AUTOMATION",
+      "committee_role": "Co-Leader",
+      "code": "applications.decide",
+      "applies_to": "own",
+      "include_sub_committees": false
+    },
+    {
+      "committee_code": "AUTOMATION",
+      "committee_role": "Leader",
+      "code": "applications.decide",
+      "applies_to": "own",
+      "include_sub_committees": false
+    },
+    {
+      "committee_code": "CONTENT",
+      "committee_role": "Co-Leader",
+      "code": "applications.decide",
+      "applies_to": "own",
+      "include_sub_committees": false
+    },
+    {
+      "committee_code": "CONTENT",
+      "committee_role": "Leader",
+      "code": "applications.decide",
+      "applies_to": "own",
+      "include_sub_committees": false
+    },
+    {
+      "committee_code": "CYBER",
+      "committee_role": "Co-Leader",
+      "code": "applications.decide",
+      "applies_to": "own",
+      "include_sub_committees": false
+    },
+    {
+      "committee_code": "CYBER",
+      "committee_role": "Leader",
+      "code": "applications.decide",
+      "applies_to": "own",
+      "include_sub_committees": false
+    },
+    {
       "committee_code": "DATA",
       "committee_role": "Co-Leader",
       "code": "applications.decide",
@@ -41,9 +142,44 @@
       "include_sub_committees": false
     },
     {
+      "committee_code": "DMD",
+      "committee_role": "Co-Leader",
+      "code": "applications.decide",
+      "applies_to": "own",
+      "include_sub_committees": false
+    },
+    {
+      "committee_code": "DMD",
+      "committee_role": "Leader",
+      "code": "applications.decide",
+      "applies_to": "own",
+      "include_sub_committees": false
+    },
+    {
+      "committee_code": "PM",
+      "committee_role": "Co-Leader",
+      "code": "applications.decide",
+      "applies_to": "own",
+      "include_sub_committees": false
+    },
+    {
+      "committee_code": "PM",
+      "committee_role": "Leader",
+      "code": "applications.decide",
+      "applies_to": "own",
+      "include_sub_committees": false
+    },
+    {
       "committee_code": "PR",
       "committee_role": "Co-Leader",
       "code": "applications.decide",
+      "applies_to": "own",
+      "include_sub_committees": false
+    },
+    {
+      "committee_code": "PR",
+      "committee_role": "Co-Leader",
+      "code": "events.create",
       "applies_to": "own",
       "include_sub_committees": false
     },
@@ -71,6 +207,13 @@
     {
       "committee_code": "PR",
       "committee_role": "Leader",
+      "code": "events.create",
+      "applies_to": "own",
+      "include_sub_committees": false
+    },
+    {
+      "committee_code": "PR",
+      "committee_role": "Leader",
       "code": "registrants.view",
       "applies_to": "all",
       "include_sub_committees": false
@@ -83,17 +226,87 @@
       "include_sub_committees": false
     },
     {
-      "committee_code": "PR",
-      "committee_role": "Member",
-      "code": "registrants.view",
-      "applies_to": "all",
+      "committee_code": "ROBOTICS",
+      "committee_role": "Co-Leader",
+      "code": "applications.decide",
+      "applies_to": "own",
       "include_sub_committees": false
     },
     {
-      "committee_code": "PR",
-      "committee_role": "Member",
-      "code": "registrations.review",
-      "applies_to": "all",
+      "committee_code": "ROBOTICS",
+      "committee_role": "Leader",
+      "code": "applications.decide",
+      "applies_to": "own",
+      "include_sub_committees": false
+    },
+    {
+      "committee_code": "WEB",
+      "committee_role": "Co-Leader",
+      "code": "applications.decide",
+      "applies_to": "own",
+      "include_sub_committees": false
+    },
+    {
+      "committee_code": "WEB",
+      "committee_role": "Leader",
+      "code": "applications.decide",
+      "applies_to": "own",
+      "include_sub_committees": false
+    },
+    {
+      "committee_code": null,
+      "committee_role": "Co-Leader",
+      "code": "dashboard.view",
+      "applies_to": "own",
+      "include_sub_committees": false
+    },
+    {
+      "committee_code": null,
+      "committee_role": "Co-Leader",
+      "code": "members.manage",
+      "applies_to": "own",
+      "include_sub_committees": false
+    },
+    {
+      "committee_code": null,
+      "committee_role": "Co-Leader",
+      "code": "points.manage",
+      "applies_to": "own",
+      "include_sub_committees": false
+    },
+    {
+      "committee_code": null,
+      "committee_role": "Co-Leader",
+      "code": "tasks.manage",
+      "applies_to": "own",
+      "include_sub_committees": false
+    },
+    {
+      "committee_code": null,
+      "committee_role": "Leader",
+      "code": "dashboard.view",
+      "applies_to": "own",
+      "include_sub_committees": false
+    },
+    {
+      "committee_code": null,
+      "committee_role": "Leader",
+      "code": "members.manage",
+      "applies_to": "own",
+      "include_sub_committees": false
+    },
+    {
+      "committee_code": null,
+      "committee_role": "Leader",
+      "code": "points.manage",
+      "applies_to": "own",
+      "include_sub_committees": false
+    },
+    {
+      "committee_code": null,
+      "committee_role": "Leader",
+      "code": "tasks.manage",
+      "applies_to": "own",
       "include_sub_committees": false
     }
   ]
