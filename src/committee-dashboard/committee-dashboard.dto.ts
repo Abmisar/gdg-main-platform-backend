@@ -12,6 +12,7 @@ import {
   IsOptional,
   IsString,
   IsUrl,
+  IsUUID,
   Matches,
   Max,
   MaxLength,
@@ -216,6 +217,9 @@ export class UpdateLeadershipTaskDto {
   status?: CommitteeTaskStatus;
 }
 export class UpdateCommitteePointsDto {
+  @IsUUID('4')
+  operationId: string;
+
   @IsInt()
   pointsDelta!: number;
 

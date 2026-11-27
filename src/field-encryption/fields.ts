@@ -101,6 +101,7 @@ export const storage: Record<string, Storage> = {
     table: 'committee_point_entry',
     pk: 'point_entry_id',
     fields: {
+      recipientName: { column: 'recipient_name' },
       reason: { column: 'reason' },
     },
   },
@@ -108,6 +109,7 @@ export const storage: Record<string, Storage> = {
     table: 'global_point_entry',
     pk: 'point_entry_id',
     fields: {
+      recipientName: { column: 'recipient_name' },
       reason: { column: 'reason' },
     },
   },

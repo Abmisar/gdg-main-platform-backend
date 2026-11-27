@@ -1228,6 +1228,11 @@ export class CommitteeDashboardService {
         || (canManageOwnCommittee && membership[0].role === 'Member');
       if (!mayAwardTarget) throw new ForbiddenException();
 
+      const replay = await this.replayAward(transaction, dto, memberId, targetMemberId, committee.committeeId);
+      if (replay) return replay;
+      const recipient = await transaction.member.findUniqueOrThrow({
+        where: { memberId: targetMemberId }, select: { person: { select: { fullName: true } } },
+      });
       const current = await transaction.committeePointEntry.aggregate({
         where: { committeeId: committee.committeeId, memberId: targetMemberId },
         _sum: { pointsDelta: true },
@@ -1239,18 +1244,36 @@ export class CommitteeDashboardService {
         data: {
           committeeId: committee.committeeId,
           memberId: targetMemberId,
+          operationId: dto.operationId,
+          recipientName: recipient.person.fullName,
           awardedByMemberId: memberId,
           pointsDelta: dto.pointsDelta,
           reason: dto.reason.trim(),
         },
-        include: { recipient: { include: { member: { include: { person: true } } } } },
       });
       return {
         id: String(entry.pointEntryId), memberId: String(entry.memberId),
-        memberName: entry.recipient.member.person.fullName, pointsDelta: entry.pointsDelta,
+        memberName: recipient.person.fullName, pointsDelta: entry.pointsDelta,
         reason: entry.reason, createdAt: entry.createdAt.toISOString(),
       };
     }, { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted });
+  }
+
+  private async replayAward(tx: Prisma.TransactionClient, dto: UpdateCommitteePointsDto, actorId: number, memberId: number, committeeId: number | null) {
+    const operationId = dto.operationId.toLowerCase();
+    await tx.$queryRaw`SELECT 1 FROM pg_advisory_xact_lock(hashtextextended(${operationId}, 0))`;
+    const where = { operationId };
+    const committee = await tx.committeePointEntry.findUnique({ where });
+    const prior = committee ?? await tx.globalPointEntry.findUnique({ where });
+    if (!prior) return null;
+    if ((committee?.committeeId ?? null) !== committeeId || prior.memberId !== memberId ||
+      prior.awardedByMemberId !== actorId || prior.pointsDelta !== dto.pointsDelta || prior.reason !== dto.reason.trim()) {
+      throw new ConflictException('This operation ID belongs to a different points award.');
+    }
+    return {
+      id: String(prior.pointEntryId), memberId: String(prior.memberId), memberName: prior.recipientName!,
+      pointsDelta: prior.pointsDelta, reason: prior.reason, createdAt: prior.createdAt.toISOString(),
+    };
   }
 
   async updateDeveloperLeaderPoints(user: RequestUser | undefined, targetMemberId: number, dto: UpdateCommitteePointsDto) {
@@ -1270,10 +1293,12 @@ export class CommitteeDashboardService {
     if (!target) throw new NotFoundException();
     return this.prisma.$transaction(async (transaction) => {
       await transaction.$queryRaw`SELECT member_id FROM member WHERE member_id = ${targetMemberId} FOR UPDATE`;
+      const replay = await this.replayAward(transaction, dto, user.memberId!, targetMemberId, null);
+      if (replay) return replay;
       const current = await transaction.globalPointEntry.aggregate({ where: { memberId: targetMemberId }, _sum: { pointsDelta: true } });
       if ((current._sum.pointsDelta ?? 0) + dto.pointsDelta < 0) throw new ForbiddenException('A points deduction cannot reduce a member below zero.');
       const entry = await transaction.globalPointEntry.create({
-        data: { memberId: targetMemberId, awardedByMemberId: user.memberId!, pointsDelta: dto.pointsDelta, reason: dto.reason.trim() },
+        data: { operationId: dto.operationId, recipientName: target.member.person.fullName, memberId: targetMemberId, awardedByMemberId: user.memberId!, pointsDelta: dto.pointsDelta, reason: dto.reason.trim() },
       });
       return {
         id: String(entry.pointEntryId), memberId: String(targetMemberId), memberName: target.member.person.fullName,
