@@ -9,12 +9,15 @@ import tempfile
 
 def main():
     target, name = sys.argv[1:]
-    if target not in {"dev", "prod"} or target == "dev" and name not in {"frontend", "backend", "network"}:
+    if target not in {"dev", "prod"} or target == "dev" and name not in {"frontend", "backend", "network", "migration"}:
         raise ValueError("Unknown target or service")
     template = Path(__file__).parent / "env" / (name + ".env.example")
-    if name not in {"frontend", "backend", "tunnel", "backup", "restore", "network"}:
+    if name not in {"frontend", "backend", "tunnel", "backup", "restore", "network", "postgres", "migration", "backend.jeddah", "backup.jeddah", "restore.jeddah"}:
         raise ValueError("Unknown environment")
     directory = Path.home() / ".config" / "gdg" / target
+    if name.endswith(".jeddah") or name == "postgres":
+        directory = directory / "jeddah"
+        name = name.split(".")[0]
     directory.mkdir(mode=0o700, parents=True, exist_ok=True)
     with open("/dev/tty", "rb", buffering=0):
         lines = []
@@ -35,7 +38,7 @@ def main():
                 raise ValueError("Use an absolute identity file path")
             if key == "API_PROXY_TARGET=" and value != "http://gdg-backend:3001":
                 raise ValueError("Use the internal Oracle backend origin")
-            if not value or any(c in value for c in "\r\n\0") or value != value.strip() or any(c in value for c in "'\"\\"):
+            if not value or any(c in value for c in "\r\n\0") or value != value.strip() or any(c in value for c in "'\\"):
                 raise ValueError("Use a single nonempty unquoted value without backslashes or surrounding whitespace")
             lines.append(key + value)
     with tempfile.NamedTemporaryFile(mode="w", dir=directory, delete=False) as out:

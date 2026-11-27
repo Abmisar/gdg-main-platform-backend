@@ -1,0 +1,8 @@
+[Unit]
+Description=Archive GDG database and storage to Jeddah Object Storage
+
+[Service]
+Type=oneshot
+ExecStart=%h/.local/state/gdg/prod/current/snapshot-run.sh backup backup
+UMask=0077
+TimeoutStartSec=6h

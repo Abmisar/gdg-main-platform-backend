@@ -1,0 +1,127 @@
+name: gdg-oracle
+x-runtime: &runtime
+  platform: linux/arm64
+  restart: unless-stopped
+  security_opt: [no-new-privileges:true]
+  cap_drop: [ALL]
+  logging:
+    driver: json-file
+    options:
+      max-size: 10m
+      max-file: "3"
+
+services:
+  postgres:
+    image: postgres:18-bookworm@sha256:e742a2668255221388004f3a42b6150a2103f5054ab3a4a93ae9e4f01e551c35
+    platform: linux/arm64
+    restart: unless-stopped
+    env_file:
+      - path: ${GDG_CONFIG:-${HOME}/.config/gdg}/postgres.env
+        format: raw
+    environment:
+      POSTGRES_DB: gdg
+      POSTGRES_INITDB_ARGS: --auth-host=scram-sha-256
+    command: [postgres, -c, shared_buffers=512MB, -c, work_mem=4MB, -c, maintenance_work_mem=128MB, -c, max_connections=60]
+    mem_limit: 3g
+    shm_size: 256m
+    networks: [database]
+    volumes:
+      - pgdata:/var/lib/postgresql
+      - ./init-postgres.sh:/docker-entrypoint-initdb.d/10-roles.sh:ro
+    healthcheck:
+      test: [CMD, pg_isready, -U, postgres, -d, gdg]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+  backup:
+    profiles: [maintenance]
+    image: gdg-backup:${RELEASE_TAG:?release tag required}
+    platform: linux/arm64
+    build:
+      context: ${BACKEND_SOURCE:-${HOME}/backend}/deploy/oracle
+      dockerfile: Dockerfile.backup
+      args:
+        POSTGRES_IMAGE: postgres:18-bookworm@sha256:e742a2668255221388004f3a42b6150a2103f5054ab3a4a93ae9e4f01e551c35
+    networks: [database, backup_egress]
+    env_file:
+      - path: ${GDG_SNAPSHOT_CONFIG:-${GDG_CONFIG:-${HOME}/.config/gdg}/backup.env}
+        format: raw
+    environment:
+      PGHOST: postgres
+      PGPORT: 5432
+    entrypoint: [python3, /opt/gdg/snapshot.py]
+  backend:
+    <<: *runtime
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      database: {}
+      app:
+        aliases: [gdg-backend, "${COMPOSE_PROJECT_NAME}-backend"]
+      backend_egress:
+        gw_priority: 1
+    environment:
+      TRUSTED_CF_PROXY_IPS: ${APP_NETWORK_PREFIX:?network prefix required}.2,${APP_NETWORK_PREFIX}.3
+    ports:
+      - "127.0.0.1:${BACKEND_PORT}:3001"
+    cpus: ${APP_CPUS}
+    mem_limit: ${APP_MEMORY}
+    image: gdg-backend:${RELEASE_TAG:?release tag required}
+    build:
+      context: ${BACKEND_SOURCE:-${HOME}/backend}
+      dockerfile: Dockerfile
+    env_file:
+      - path: ${GDG_CONFIG:-${HOME}/.config/gdg}/backend.env
+        format: raw
+    deploy:
+      replicas: 1
+    healthcheck:
+      test: [CMD, node, -e, "fetch('http://127.0.0.1:3001/health/ready').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 30s
+      start_period: 30s
+      timeout: 8s
+      retries: 3
+  frontend:
+    <<: *runtime
+    ports:
+      - "127.0.0.1:${FRONTEND_PORT}:3000"
+    cpus: ${APP_CPUS}
+    mem_limit: ${APP_MEMORY}
+    image: gdg-frontend:${RELEASE_TAG:?release tag required}
+    build:
+      context: ${FRONTEND_SOURCE:-${HOME}/frontend}
+      dockerfile: Dockerfile.oracle
+      args:
+        API_PROXY_TARGET: ${API_PROXY_TARGET:?internal API origin required}
+        CSP_IMAGE_ORIGINS: ${CSP_IMAGE_ORIGINS:?storage origin required}
+        CSP_REPORT_URI: ${CSP_REPORT_URI:-}
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:?public API origin required}
+    env_file:
+      - path: ${GDG_CONFIG:-${HOME}/.config/gdg}/frontend.env
+        format: raw
+    networks:
+      app:
+        aliases: [gdg-frontend, "${COMPOSE_PROJECT_NAME}-frontend"]
+        ipv4_address: ${APP_NETWORK_PREFIX}.3
+      frontend_egress:
+        gw_priority: 1
+    healthcheck:
+      test: [CMD, node, -e, "fetch('http://127.0.0.1:3000/colorful-logo.svg',{redirect:'manual'}).then(r=>process.exit(r.status===200?0:1)).catch(()=>process.exit(1))"]
+      interval: 30s
+      start_period: 20s
+      timeout: 5s
+      retries: 3
+
+volumes:
+  pgdata: {}
+
+networks:
+  database:
+    internal: true
+  app:
+    external: true
+    name: ${COMPOSE_PROJECT_NAME}-app
+  backup_egress: {}
+  backend_egress: {}
+  frontend_egress: {}
